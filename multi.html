@@ -436,7 +436,7 @@ function aiDeclare(p, rem = 0){
   const h = p.hand;
   const b = aiSearch(h.nums.map(n => n.v), h.ops, h.sqrt);
   const eh = {val:b.high.val, cards:h.nums}, el = {val:b.low.val, cards:h.nums};
-  const shown = G.players.filter(q => q.hand && q.hand.decl && !q.hand.folded);
+  const shown = G.players.filter(q => q.hand && q.hand.decl && q.hand.shown && !q.hand.folded);
   const hiList = shown.filter(q => q.hand.decl.type !== 'low'), loList = shown.filter(q => q.hand.decl.type !== 'high');
   const curHi = sideBest('high', hiList.map(q => ({p:q, entry:{val:q.hand.decl.high.val, cards:q.hand.nums}})));
   const curLo = sideBest('low', loList.map(q => ({p:q, entry:{val:q.hand.decl.low.val, cards:q.hand.nums}})));
@@ -730,7 +730,7 @@ async function playHand(gid){
   G.button = nextActive(G.button);
   const order = orderFrom(nextActive(G.button));
   G.players.forEach(p => p.hand = null);
-  order.forEach(p => p.hand = {nums:[], ops:['+','-','/'], sqrt:false, special:null, contrib:0, folded:false, acted:false, decl:null, revealed:false, act:'', tags:[]});
+  order.forEach(p => p.hand = {nums:[], ops:['+','-','/'], sqrt:false, special:null, contrib:0, folded:false, acted:false, decl:null, shown:false, revealed:false, act:'', tags:[]});
   G.cap = Math.min(...order.map(p => p.chips));
   G.phase = '發暗牌';
   say(`第 ${G.hand} 局開始。本局每人投入上限 ${G.cap} 枚（場上最少籌碼）。`, true);
@@ -765,7 +765,7 @@ async function playHand(gid){
   if (live.length > 1){
     G.phase = '宣告與開牌';
     for (const [idx, p] of live.entries()){
-      const rem = live.slice(idx + 1).filter(q => !q.hand.folded).length;
+      const rem = live.filter(q => q !== p && !q.hand.folded).length;
       if (p.hand.folded) continue;
       G.turn = p.i; render();
       let d = null;
@@ -780,15 +780,13 @@ async function playHand(gid){
         p.hand.folded = true; p.hand.act = '未完成算式';
         say(`${p.name} 沒有在時間內選邊並排完算式，視為棄牌。`); render(); continue;
       }
-      p.hand.decl = d; p.hand.revealed = true;
-      const label = {high:'大（20）', low:'小（1）', swing:'Swing（大小都賭）'}[d.type];
-      const parts = [];
-      if (d.high) parts.push(`${exprText(p.hand, d.high.expr)} = ${fmt(d.high.val)}`);
-      if (d.low) parts.push(`${exprText(p.hand, d.low.expr)} = ${fmt(d.low.val)}`);
-      say(`${p.name} 宣告 ${label}：${parts.join('；')}`);
-      await sleep(450);
+      p.hand.decl = d;
+      say(`${p.name} 已宣告（內容保密）。`);
+      await sleep(350);
     }
     G.turn = -1;
+    await revealDeclarations(live, alive);
+    if (!alive()) return;
   }
   const fin = live.length > 1 ? live.filter(p => !p.hand.folded && p.hand.decl) : inHand(order);
   if (fin.length === 1){
@@ -806,6 +804,26 @@ async function playHand(gid){
   G.phase = '本局結束';
   render();
   await ask(G.players[mySeat], 'next', {last:G.hand >= S.hands}, S.timer ? 20000 : 0, () => true);
+}
+// After everyone has declared in secret, the dealer turns the declarations over one by one.
+async function revealDeclarations(list, alive){
+  G.phase = '公布宣告';
+  say('所有人都宣告完畢，荷官依序公布。', true);
+  await sleep(600);
+  for (const p of list){
+    if (!alive()) return;
+    if (p.hand.folded || !p.hand.decl) continue;
+    const d = p.hand.decl;
+    G.turn = p.i;
+    p.hand.shown = true; p.hand.revealed = true;
+    const label = {high:'大（20）', low:'小（1）', swing:'Swing（大小都賭）'}[d.type];
+    const parts = [];
+    if (d.high) parts.push(`${exprText(p.hand, d.high.expr)} = ${fmt(d.high.val)}`);
+    if (d.low) parts.push(`${exprText(p.hand, d.low.expr)} = ${fmt(d.low.val)}`);
+    say(`${p.name} 宣告 ${label}：${parts.join('；')}`);
+    render(); await sleep(1100);
+  }
+  G.turn = -1;
 }
 async function dealOpen(p, gid, betMs){
   const h = p.hand;
@@ -897,7 +915,7 @@ function showdown(live){
   } else {
     const share = Math.floor(G.pot / winners.length), rem = G.pot - share * winners.length;
     winners.forEach(w => { w.chips += share; w.hand.tags.push(['good', `+${share}`]); });
-    say(`底池 ${G.pot} 枚由 ${winners.map(w => w.name).join('、')} 平分，每人 ${share} 枚${rem ? `，餘下 ${rem} 枚由荷官沒收` : ''}。`, true);
+    say(winners.length === 1 ? `底池 ${G.pot} 枚全部由 ${winners[0].name} 拿走。` : `底池 ${G.pot} 枚由 ${winners.map(w => w.name).join('、')} 平分，每人 ${share} 枚${rem ? `，餘下 ${rem} 枚由荷官沒收` : ''}。`, true);
     G.house += rem;
   }
   G.pot = 0;
@@ -922,7 +940,8 @@ function viewFor(seat){
       hand:p.hand ? {
         nums:p.hand.nums.map(n => (n.hidden && p.i !== seat && !p.hand.revealed) ? {back:true} : n),
         ops:p.hand.ops, sqrt:p.hand.sqrt, contrib:p.hand.contrib, folded:p.hand.folded, act:p.hand.act, tags:p.hand.tags,
-        decl:p.hand.decl ? {
+        declared:!!p.hand.decl,
+        decl:p.hand.decl && (p.hand.shown || p.i === seat) ? {
           type:p.hand.decl.type,
           high:p.hand.decl.high ? {text:exprText(p.hand, p.hand.decl.high.expr), val:p.hand.decl.high.val} : null,
           low:p.hand.decl.low ? {text:exprText(p.hand, p.hand.decl.low.expr), val:p.hand.decl.low.val} : null,
@@ -1039,7 +1058,8 @@ function seatHTML(p, isMe, area){
     ops = h.ops.map(o => `<span class="op${o === '*' ? ' special' : ''}">${OPD[o]}</span>`).join('') + (h.sqrt ? '<span class="op special">√</span>' : '');
     sub.push(`本局投入 ${h.contrib}`);
     if (h.act) sub.push(`<span class="pill${h.folded ? ' bad' : ''}">${esc(h.act)}</span>`);
-    if (h.decl){
+    if (h.declared && !h.decl) sub.push('<span class="pill">已宣告</span>');
+    else if (h.decl){
       const m = {high:['hi','大'], low:['lo','小'], swing:['sw','Swing']}[h.decl.type];
       sub.push(`<span class="pill ${m[0]}">宣告 ${m[1]}</span>`);
       if (h.decl.high) eq += `<div class="eqline">${esc(h.decl.high.text)} = <em>${fmt(h.decl.high.val)}</em></div>`;
@@ -1220,7 +1240,7 @@ function rulesHTML(){
     <li>第一輪下注（類似德州撲克，但沒有大小盲）。</li>
     <li>再發 1 張公開牌，特殊牌規則同上，這就是最終手牌。</li>
     <li>最後下注。</li>
-    <li>依順序輪流宣告「大」「小」或「Swing」，宣告的同時排出算式開牌。</li>
+    <li>依順序輪流秘密宣告「大」「小」或「Swing」並排出算式；所有人宣告完後，荷官再依序一一公布。</li>
   </ol>
   <h4>算式</h4>
   <ul><li>4 張數字牌與 3 張符號牌全部都要用到；有 √ 時也要用，且只能用在一個數字上。</li><li>沒有括號，先乘除、後加減。不能除以 0。</li></ul>
