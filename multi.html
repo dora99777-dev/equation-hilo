@@ -172,6 +172,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-
   .log{max-height:240px}
 }
 
+/* Only newly dealt cards animate; redraws do not replay it */
+.card{animation:none}
+.card.fresh{animation:deal .25s ease-out}
+@media (prefers-reduced-motion: reduce){.card.fresh{animation:none}}
+
 /* ---- multiplayer: lobby / waiting room ---- */
 a.btn{text-decoration:none;display:inline-block;color:var(--text)}
 .invite .btn{white-space:nowrap;flex:none}
