@@ -214,7 +214,7 @@ const SAVE_KEY = 'eqhilo.single.v1';
 function saveGame(){
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      v:1, hand:G.hand, button:G.button, house:G.house, savedAt:Date.now(),
+      v:1, hand:G.hand, button:G.button, house:G.house, diff:G.diff, savedAt:Date.now(),
       players:G.players.map(p => ({chips:p.chips, out:p.out})), log:G.log.slice(0, 40)
     }));
   } catch (e) {}
@@ -222,13 +222,14 @@ function saveGame(){
 function loadSave(){
   try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && s.v === 1 ? s : null; } catch (e) { return null; }
 }
+function prefDiff(){ try { const d = localStorage.getItem('eqhilo.diff'); return ['easy','normal','hard'].includes(d) ? d : 'normal'; } catch (e) { return 'normal'; } }
 function clearSave(){ try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
 function continueGame(){
   const s = loadSave();
   if (!s) return;
   closeModal();
   const id = newGame();
-  G.button = s.button; G.house = s.house; G.hand = s.hand; G.log = s.log || [];
+  G.button = s.button; G.house = s.house; G.hand = s.hand; G.log = s.log || []; G.diff = s.diff || 'normal';
   s.players.forEach((q, i) => { G.players[i].chips = q.chips; G.players[i].out = q.out; });
   render(); renderLog();
   run(id, s.hand + 1);
@@ -270,13 +271,20 @@ function perms(arr){
   return out;
 }
 const IDX_PERMS = perms([0,1,2,3]);
-function search(vals, ops, hasSqrt){
+// limit: how many arrangements to try (computer players on easier levels only look at some of them).
+function search(vals, ops, hasSqrt, limit = Infinity){
   const opPerms = perms(ops);
   const sq = hasSqrt ? [0,1,2,3] : [-1];
+  let combos = [];
+  for (const ord of IDX_PERMS) for (const op of opPerms) for (const s of sq) combos.push([ord, op, s]);
+  if (limit < combos.length){
+    for (let i = 0; i < limit; i++){ const j = i + Math.floor(Math.random() * (combos.length - i)); [combos[i], combos[j]] = [combos[j], combos[i]]; }
+    combos = combos.slice(0, limit);
+  }
   let hi = null, lo = null;
-  for (const ord of IDX_PERMS){
+  for (const [ord, op, s] of combos){
     const v = ord.map(i => vals[i]);
-    for (const op of opPerms) for (const s of sq){
+    {
       const r = evalEq(v, op, s);
       if (r === null) continue;
       const hd = Math.abs(r - 20), ld = Math.abs(r - 1);
@@ -284,6 +292,7 @@ function search(vals, ops, hasSqrt){
       if (!lo || ld < lo.dist - EPS) lo = {val:r, dist:ld, expr:{order:ord, ops:op, sqrtAt:s}};
     }
   }
+  if ((!hi || !lo) && limit !== Infinity) return search(vals, ops, hasSqrt);
   return {high:hi, low:lo};
 }
 function fmt(x){
@@ -320,6 +329,12 @@ function sideBest(side, list){ // list of {p, entry}
   return list.reduce((best, x) => (!best || beats(side, x.entry, best.entry)) ? x : best, null);
 }
 
+/* ---------- AI difficulty ---------- */
+const AI_LIMIT = {easy:10, normal:28, hard:Infinity};
+const DIFF_NAME = {easy:'簡單', normal:'普通', hard:'困難'};
+function curDiff(){ const d = G.diff; return AI_LIMIT[d] !== undefined ? d : 'normal'; }
+function aiSearch(vals, ops, hasSqrt){ return search(vals, ops, hasSqrt, AI_LIMIT[curDiff()]); }
+
 /* ---------- AI ---------- */
 function strength(hand){
   const vals = hand.nums.map(n => n.v);
@@ -328,7 +343,7 @@ function strength(hand){
   for (let s = 0; s < samples; s++){
     const v = vals.slice();
     while (v.length < 4) v.push(Math.floor(Math.random() * 11));
-    const b = search(v, hand.ops, hand.sqrt);
+    const b = aiSearch(v, hand.ops, hand.sqrt);
     sh += b.high ? Math.exp(-b.high.dist * 0.45) : 0;
     sl += b.low ? Math.exp(-b.low.dist * 1.1) : 0;
   }
@@ -359,25 +374,27 @@ function aiSurrender(p){
   }
   return best;
 }
-function aiDeclare(p){
+// Declaring: weigh each side by how close we are, how crowded it already is, and how many players still
+// declare after us. Hitting exactly 1 is common, so a "1" with a not-so-low smallest card often loses the tie.
+function aiDeclare(p, rem = 0){
   const h = p.hand;
-  const b = search(h.nums.map(n => n.v), h.ops, h.sqrt);
+  const b = aiSearch(h.nums.map(n => n.v), h.ops, h.sqrt);
   const eh = {val:b.high.val, cards:h.nums}, el = {val:b.low.val, cards:h.nums};
-  const shown = G.players.filter(q => q.hand && q.hand.decl);
-  const curHi = sideBest('high', shown.filter(q => q.hand.decl.type !== 'low').map(q => ({p:q, entry:{val:q.hand.decl.high.val, cards:q.hand.nums}})));
-  const curLo = sideBest('low', shown.filter(q => q.hand.decl.type !== 'high').map(q => ({p:q, entry:{val:q.hand.decl.low.val, cards:q.hand.nums}})));
+  const shown = G.players.filter(q => q.hand && q.hand.decl && !q.hand.folded);
+  const hiList = shown.filter(q => q.hand.decl.type !== 'low'), loList = shown.filter(q => q.hand.decl.type !== 'high');
+  const curHi = sideBest('high', hiList.map(q => ({p:q, entry:{val:q.hand.decl.high.val, cards:q.hand.nums}})));
+  const curLo = sideBest('low', loList.map(q => ({p:q, entry:{val:q.hand.decl.low.val, cards:q.hand.nums}})));
   const winHi = !curHi || beats('high', eh, curHi.entry);
   const winLo = !curLo || beats('low', el, curLo.entry);
-  const mk = (r) => ({val:r.val, expr:r.expr});
+  const mk = r => ({val:r.val, expr:r.expr});
   if (winHi && winLo && b.high.dist < 0.5 && b.low.dist < 0.15 && Math.random() < 0.35 + p.agg * 0.5)
     return {type:'swing', high:mk(b.high), low:mk(b.low)};
-  let type;
-  if (winHi && !winLo) type = 'high';
-  else if (winLo && !winHi) type = 'low';
-  else {
-    const sh = Math.exp(-b.high.dist * 0.45), sl = Math.exp(-b.low.dist * 1.1);
-    type = sh + Math.random() * 0.1 >= sl + Math.random() * 0.1 ? 'high' : 'low';
-  }
+  const minV = Math.min(...h.nums.map(n => n.v));
+  let sh = Math.exp(-b.high.dist * 0.3) * Math.pow(0.93, hiList.length + rem) + 0.06;
+  let sl = Math.exp(-b.low.dist * 1.1) * Math.pow(0.85, loList.length + rem) * (b.low.dist < EPS ? 0.6 + 0.4 * (1 - minV / 10) : 1);
+  if (!winHi) sh *= 0.15;
+  if (!winLo) sl *= 0.15;
+  const type = sh + Math.random() * 0.1 >= sl + Math.random() * 0.1 ? 'high' : 'low';
   return type === 'high' ? {type, high:mk(b.high)} : {type, low:mk(b.low)};
 }
 
@@ -394,7 +411,7 @@ function newGame(){
   const id = G ? G.id + 1 : 1;
   G = {
     id, hand:0, button:Math.floor(Math.random() * 6), pot:0, house:0, level:0, cap:0, turn:-1,
-    phase:'等待開始', log:[], await:null, over:false, order:[],
+    phase:'等待開始', log:[], await:null, over:false, order:[], diff:prefDiff(),
     players: ROSTER.map((r, i) => ({i, name:r.name, ai:i !== 0, agg:r.agg ?? .5, chips:START_CHIPS, out:false, hand:null}))
   };
   render(); renderLog();
@@ -456,10 +473,11 @@ async function playHand(id){
     G.result = {winners:[w]}; G.pot = 0;
   } else {
     G.phase = '宣告與開牌';
-    for (const p of live){
+    for (const [idx, p] of live.entries()){
+      const rem = live.slice(idx + 1).filter(q => !q.hand.folded).length;
       G.turn = p.i; render();
       let d;
-      if (p.ai || humanAuto()){ await sleep(900); d = aiDeclare(p); }
+      if (p.ai || humanAuto()){ await sleep(900); d = aiDeclare(p, rem); }
       else d = await waitHuman({kind:'declare', b:{type:'high', tab:'high', eq:{high:emptyEq(), low:emptyEq()}}});
       if (!alive()) return;
       p.hand.decl = d; p.hand.revealed = true;
@@ -636,6 +654,7 @@ function centerHTML(){
       <span>每人投入</span><b>${G.level}</b>
       <span>投入上限</span><b>${G.cap || '—'}</b>
       <span>荷官沒收</span><b>${G.house}</b>
+      <span>電腦難度</span><b>${DIFF_NAME[G.diff]}</b>
     </div>
   </div>`;
 }
@@ -644,7 +663,10 @@ function actionHTML(){
   if (G.over) return `<div class="panel"><h3>遊戲結束</h3><div class="row"><button class="btn primary" data-act="restart">再玩一場</button><button class="btn" data-act="showrank">查看排名</button></div></div>`;
   if (!G.hand){
     const s = loadSave();
-    return `<div class="panel"><h3>準備開始</h3><p class="hint">按下開始後，荷官會發牌給六位玩家。每局結束會自動存檔在這個瀏覽器。</p><div class="row">${s ? `<button class="btn primary" data-act="continue">繼續上一場（已打完第 ${s.hand} 局）</button><button class="btn" data-act="start">開新的一場</button>` : '<button class="btn primary" data-act="start">開始遊戲</button>'}</div></div>`;
+    const dbtn = d => `<button class="btn${G.diff === d ? ' sel' : ''}" data-act="diff" data-v="${d}">${DIFF_NAME[d]}</button>`;
+    return `<div class="panel"><h3>準備開始</h3>
+      <div class="row"><span class="hint">電腦難度</span>${dbtn('easy')}${dbtn('normal')}${dbtn('hard')}</div>
+      <p class="hint">${{easy:'簡單：電腦常常看不出最好的排法。', normal:'普通：電腦大多數時候算得出好的算式，偶爾會漏算。', hard:'困難：電腦每次都會找到最佳算式。'}[G.diff]}按下開始後，荷官會發牌給六位玩家；每局結束會自動存檔在這個瀏覽器。${s ? '（繼續上一場會沿用存檔時的難度）' : ''}</p><div class="row">${s ? `<button class="btn primary" data-act="continue">繼續上一場（已打完第 ${s.hand} 局）</button><button class="btn" data-act="start">開新的一場</button>` : '<button class="btn primary" data-act="start">開始遊戲</button>'}</div></div>`;
   }
   if (!a){
     let t = '輪到其他玩家行動中…';
@@ -753,6 +775,8 @@ function rulesHTML(){
   <ul><li>可以過牌、跟注、加注或棄牌。</li><li>每人本局的總投入，不能超過場上籌碼最少的玩家（開局時的籌碼）。</li></ul>
   <h4>勝負</h4>
   <ul><li>賭大：最接近 20 的人贏；賭小：最接近 1 的人贏。</li><li>距離相同時，賭大比手上最大的數字牌，賭小比最小的數字牌；數字也相同就比顏色（賭大比高、賭小比低）。</li><li>Swing 要排出兩條算式，大小兩邊都贏才算贏，否則失去資格。</li><li>底池由所有贏家平分，除不盡的籌碼由荷官沒收。</li><li>籌碼歸零即淘汰；9 局後以籌碼數決定名次。</li></ul>
+  <h4>電腦難度</h4>
+  <ul><li>簡單：電腦只會想到少數幾種排法，常常錯過最好的算式。</li><li>普通：電腦大多數時候算得出好的算式，偶爾會漏算。</li><li>困難：電腦每次都把所有排法算過一遍。</li><li>排出剛好 1 其實很常見（大約三成的手牌做得到），所以押小時常要靠「最小的數字牌」比平手。</li></ul>
   <div class="row"><button class="btn primary" data-act="close">知道了</button></div>`;
 }
 
@@ -765,6 +789,7 @@ document.addEventListener('click', (e) => {
   switch (act){
     case 'start': if (!G.hand){ run(G.id); } break;
     case 'continue': if (!G.hand) continueGame(); break;
+    case 'diff': if (!G.hand){ G.diff = el.dataset.v; try { localStorage.setItem('eqhilo.diff', G.diff); } catch (x) {} render(); } break;
     case 'restart': closeModal(); { const id = newGame(); run(id); } break;
     case 'rules': openModal(rulesHTML()); break;
     case 'close': closeModal(); break;

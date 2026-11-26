@@ -179,7 +179,7 @@ a.btn{text-decoration:none;display:inline-block;color:var(--text)}
 .pre{grid-column:1/-1;grid-row:2;display:flex;flex-direction:column;gap:14px;min-width:0}
 .pre-grid,.wait-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:14px}
 .field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);min-width:0}
-.field input,.invite input{background:#0c1a16;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font:inherit;font-size:16px;width:100%;min-width:0}
+.field input,.field select,.invite input{background:#0c1a16;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font:inherit;font-size:16px;width:100%;min-width:0}
 #join-code{font-family:var(--f-mono);letter-spacing:.3em;text-transform:uppercase}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .check{display:flex;gap:8px;align-items:center;font-size:14px}
@@ -274,13 +274,20 @@ function perms(arr){
   return out;
 }
 const IDX_PERMS = perms([0,1,2,3]);
-function search(vals, ops, hasSqrt){
+// limit: how many arrangements to try (computer players on easier levels only look at some of them).
+function search(vals, ops, hasSqrt, limit = Infinity){
   const opPerms = perms(ops);
   const sq = hasSqrt ? [0,1,2,3] : [-1];
+  let combos = [];
+  for (const ord of IDX_PERMS) for (const op of opPerms) for (const s of sq) combos.push([ord, op, s]);
+  if (limit < combos.length){
+    for (let i = 0; i < limit; i++){ const j = i + Math.floor(Math.random() * (combos.length - i)); [combos[i], combos[j]] = [combos[j], combos[i]]; }
+    combos = combos.slice(0, limit);
+  }
   let hi = null, lo = null;
-  for (const ord of IDX_PERMS){
+  for (const [ord, op, s] of combos){
     const v = ord.map(i => vals[i]);
-    for (const op of opPerms) for (const s of sq){
+    {
       const r = evalEq(v, op, s);
       if (r === null) continue;
       const hd = Math.abs(r - 20), ld = Math.abs(r - 1);
@@ -288,6 +295,7 @@ function search(vals, ops, hasSqrt){
       if (!lo || ld < lo.dist - EPS) lo = {val:r, dist:ld, expr:{order:ord, ops:op, sqrtAt:s}};
     }
   }
+  if ((!hi || !lo) && limit !== Infinity) return search(vals, ops, hasSqrt);
   return {high:hi, low:lo};
 }
 function fmt(x){
@@ -352,6 +360,12 @@ function buildDecl(h, raw){
   return d;
 }
 
+/* ---------- AI difficulty ---------- */
+const AI_LIMIT = {easy:10, normal:28, hard:Infinity};
+const DIFF_NAME = {easy:'簡單', normal:'普通', hard:'困難'};
+function curDiff(){ const d = (S && S.diff); return AI_LIMIT[d] !== undefined ? d : 'normal'; }
+function aiSearch(vals, ops, hasSqrt){ return search(vals, ops, hasSqrt, AI_LIMIT[curDiff()]); }
+
 /* ---------- AI (same as single player) ---------- */
 function strength(hand){
   const vals = hand.nums.map(n => n.v);
@@ -360,7 +374,7 @@ function strength(hand){
   for (let s = 0; s < samples; s++){
     const v = vals.slice();
     while (v.length < 4) v.push(Math.floor(Math.random() * 11));
-    const b = search(v, hand.ops, hand.sqrt);
+    const b = aiSearch(v, hand.ops, hand.sqrt);
     sh += b.high ? Math.exp(-b.high.dist * 0.45) : 0;
     sl += b.low ? Math.exp(-b.low.dist * 1.1) : 0;
   }
@@ -391,25 +405,27 @@ function aiSurrender(p){
   }
   return best;
 }
-function aiDeclare(p){
+// Declaring: weigh each side by how close we are, how crowded it already is, and how many players still
+// declare after us. Hitting exactly 1 is common, so a "1" with a not-so-low smallest card often loses the tie.
+function aiDeclare(p, rem = 0){
   const h = p.hand;
-  const b = search(h.nums.map(n => n.v), h.ops, h.sqrt);
+  const b = aiSearch(h.nums.map(n => n.v), h.ops, h.sqrt);
   const eh = {val:b.high.val, cards:h.nums}, el = {val:b.low.val, cards:h.nums};
   const shown = G.players.filter(q => q.hand && q.hand.decl && !q.hand.folded);
-  const curHi = sideBest('high', shown.filter(q => q.hand.decl.type !== 'low').map(q => ({p:q, entry:{val:q.hand.decl.high.val, cards:q.hand.nums}})));
-  const curLo = sideBest('low', shown.filter(q => q.hand.decl.type !== 'high').map(q => ({p:q, entry:{val:q.hand.decl.low.val, cards:q.hand.nums}})));
+  const hiList = shown.filter(q => q.hand.decl.type !== 'low'), loList = shown.filter(q => q.hand.decl.type !== 'high');
+  const curHi = sideBest('high', hiList.map(q => ({p:q, entry:{val:q.hand.decl.high.val, cards:q.hand.nums}})));
+  const curLo = sideBest('low', loList.map(q => ({p:q, entry:{val:q.hand.decl.low.val, cards:q.hand.nums}})));
   const winHi = !curHi || beats('high', eh, curHi.entry);
   const winLo = !curLo || beats('low', el, curLo.entry);
   const mk = r => ({val:r.val, expr:r.expr});
   if (winHi && winLo && b.high.dist < 0.5 && b.low.dist < 0.15 && Math.random() < 0.35 + p.agg * 0.5)
     return {type:'swing', high:mk(b.high), low:mk(b.low)};
-  let type;
-  if (winHi && !winLo) type = 'high';
-  else if (winLo && !winHi) type = 'low';
-  else {
-    const sh = Math.exp(-b.high.dist * 0.45), sl = Math.exp(-b.low.dist * 1.1);
-    type = sh + Math.random() * 0.1 >= sl + Math.random() * 0.1 ? 'high' : 'low';
-  }
+  const minV = Math.min(...h.nums.map(n => n.v));
+  let sh = Math.exp(-b.high.dist * 0.3) * Math.pow(0.93, hiList.length + rem) + 0.06;
+  let sl = Math.exp(-b.low.dist * 1.1) * Math.pow(0.85, loList.length + rem) * (b.low.dist < EPS ? 0.6 + 0.4 * (1 - minV / 10) : 1);
+  if (!winHi) sh *= 0.15;
+  if (!winLo) sl *= 0.15;
+  const type = sh + Math.random() * 0.1 >= sl + Math.random() * 0.1 ? 'high' : 'low';
   return type === 'high' ? {type, high:mk(b.high)} : {type, low:mk(b.low)};
 }
 
@@ -485,6 +501,7 @@ function homeHTML(){
         <label class="field">下注秒數<input type="number" id="opt-bet" value="30" min="10" max="300" inputmode="numeric"></label>
         <label class="field">排算式秒數<input type="number" id="opt-decl" value="90" min="20" max="600" inputmode="numeric"></label>
       </div>
+      <label class="field">電腦難度<select id="opt-diff"><option value="easy">簡單：常常漏算</option><option value="normal" selected>普通：偶爾漏算</option><option value="hard">困難：每次都算到最好</option></select></label>
       <div class="field-row">
         <label class="field">起始籌碼<input type="number" id="opt-chips" value="30" min="5" max="500" inputmode="numeric"></label>
         <label class="field">局數<input type="number" id="opt-hands" value="9" min="1" max="30" inputmode="numeric"></label>
@@ -511,7 +528,7 @@ function waitHTML(){
       <p class="hint" id="copyMsg">把連結或房號傳給朋友，他們填好暱稱就會出現在右邊的名單。</p>
       <h3>房間設定</h3>
       <ul class="setlist">
-        <li>空位補電腦：${st.aiFill ? '是' : '否'}</li>
+        <li>空位補電腦：${st.aiFill ? `是（難度：${DIFF_NAME[st.diff] || '普通'}）` : '否'}</li>
         <li>行動計時：${st.timer ? `下注 ${st.betSec} 秒、排算式 ${st.declSec} 秒` : '不計時'}</li>
         <li>起始籌碼 ${st.chips} 枚，共 ${st.hands} 局</li>
       </ul>
@@ -533,7 +550,7 @@ async function doCreate(){
   if (!name) return setMsg('請先輸入暱稱。');
   if (typeof Peer === 'undefined') return setMsg('連線元件載入失敗，請檢查網路後重新整理。');
   const num = (id, lo, hi, d) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
-  S = {aiFill:$('#opt-ai').checked, timer:$('#opt-timer').checked, betSec:num('#opt-bet', 10, 300, 30), declSec:num('#opt-decl', 20, 600, 90), chips:num('#opt-chips', 5, 500, 30), hands:num('#opt-hands', 1, 30, 9)};
+  S = {aiFill:$('#opt-ai').checked, timer:$('#opt-timer').checked, betSec:num('#opt-bet', 10, 300, 30), declSec:num('#opt-decl', 20, 600, 90), chips:num('#opt-chips', 5, 500, 30), hands:num('#opt-hands', 1, 30, 9), diff:['easy','normal','hard'].includes($('#opt-diff').value) ? $('#opt-diff').value : 'normal'};
   myName = name; lsSet('eqhilo.name', name);
   setMsg('建立房間中…');
   peer = null;
@@ -722,11 +739,12 @@ async function playHand(gid){
   const live = inHand(order);
   if (live.length > 1){
     G.phase = '宣告與開牌';
-    for (const p of live){
+    for (const [idx, p] of live.entries()){
+      const rem = live.slice(idx + 1).filter(q => !q.hand.folded).length;
       if (p.hand.folded) continue;
       G.turn = p.i; render();
       let d = null;
-      if (p.ai){ await sleep(900); d = aiDeclare(p); }
+      if (p.ai){ await sleep(900); d = aiDeclare(p, rem); }
       else {
         const raw = await ask(p, 'declare', {}, declMs, (reason, req) => reason === 'timeout' && req.draft ? req.draft : null);
         d = raw ? buildDecl(p.hand, raw) : null;
@@ -1182,6 +1200,7 @@ function rulesHTML(){
     <li>${st.timer ? `下注 ${st.betSec} 秒、排算式 ${st.declSec} 秒。下注逾時：不用跟注就自動過牌，要跟注就自動棄牌；排算式逾時：已排完就用目前的算式宣告，沒排完視為棄牌。` : '這個房間不計時。'}</li>
     <li>牌局中斷線的玩家當局自動棄牌，籌碼保留；用同一個瀏覽器重新進房就能回到座位。</li>
     <li>房主的網頁是荷官，房主離開時整桌結束。</li>
+    <li>電腦難度（房主開房時設定）：簡單常常漏算、普通偶爾漏算、困難每次都算到最好。排出剛好 1 很常見，押小時常要靠最小的數字牌比平手。</li>
   </ul>
   <div class="row"><button class="btn primary" data-act="close">知道了</button></div>`;
 }
