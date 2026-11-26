@@ -177,6 +177,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-
 .card{animation:none}
 .card.fresh{animation:deal .25s ease-out}
 @media (prefers-reduced-motion: reduce){.card.fresh{animation:none}}
+.need-side{color:var(--danger);font-size:13px}
 </style>
 </head>
 <body>
@@ -437,7 +438,7 @@ async function playHand(id){
       G.turn = p.i; render();
       let d;
       if (p.ai || humanAuto()){ await sleep(900); d = aiDeclare(p); }
-      else d = await waitHuman({kind:'declare', b:{type:'high', tab:'high', eq:{high:emptyEq(), low:emptyEq()}}});
+      else d = await waitHuman({kind:'declare', b:{type:null, tab:'high', eq:{high:emptyEq(), low:emptyEq()}}});
       if (!alive()) return;
       p.hand.decl = d; p.hand.revealed = true;
       const label = {high:'大（20）', low:'小（1）', swing:'Swing（大小都賭）'}[d.type];
@@ -552,6 +553,7 @@ function endGame(){
 
 /* ---------- human declare builder ---------- */
 function emptyEq(){ return {slots:[null,null,null,null,null,null,null], sqrtAt:-1}; }
+function isEmptyEq(eq){ return eq.sqrtAt < 0 && eq.slots.every(x => x === null); }
 function eqValue(eq, h){
   if (eq.slots.some(s => s === null)) return {ok:false, why:'算式還沒排完'};
   if (h.sqrt && eq.sqrtAt < 0) return {ok:false, why:'√ 必須套用在一個數字上'};
@@ -650,7 +652,8 @@ function actionHTML(){
 }
 function builderHTML(){
   const b = G.await.b, h = G.players[0].hand;
-  const needs = b.type === 'swing' ? ['high','low'] : [b.type];
+  // Until the player picks a side, they arrange one equation (stored under b.tab) and see both distances.
+  const needs = b.type === 'swing' ? ['high','low'] : [b.type || b.tab];
   if (!needs.includes(b.tab)) b.tab = needs[0];
   const eq = b.eq[b.tab];
   const usedN = new Set(eq.slots.filter((s, i) => i % 2 === 0 && s !== null));
@@ -666,13 +669,15 @@ function builderHTML(){
   }).join('');
   const pool = h.nums.map((n, i) => usedN.has(i) ? '' : `<button data-act="pn" data-i="${i}">${cardHTML(n)}</button>`).join('')
     + h.ops.map((o, i) => usedO.has(i) ? '' : `<button data-act="po" data-i="${i}"><span class="op" style="width:34px;height:34px">${OPD[o]}</span></button>`).join('');
-  const res = needs.map(t => {
-    const r = eqValue(b.eq[t], h);
-    const target = t === 'high' ? 20 : 1;
+  const res = b.type ? needs.map(t => {
+    const r = eqValue(b.eq[t], h), target = t === 'high' ? 20 : 1;
     return `<div>${t === 'high' ? '大方算式' : '小方算式'}：${r.ok ? `<span class="ok">= ${fmt(r.val)}</span>（離 ${target} 差 ${fmt(Math.abs(r.val - target))}）` : `<span class="bad">${r.why}</span>`}</div>`;
-  }).join('');
-  const ready = needs.every(t => eqValue(b.eq[t], h).ok);
-  return `<div class="panel"><h3>輪到你宣告並排出算式</h3>
+  }).join('') : (() => {
+    const r = eqValue(b.eq[b.tab], h);
+    return `<div>算式：${r.ok ? `<span class="ok">= ${fmt(r.val)}</span>（離 20 差 ${fmt(Math.abs(r.val - 20))}，離 1 差 ${fmt(Math.abs(r.val - 1))}）` : `<span class="bad">${r.why}</span>`}</div>`;
+  })();
+  const ready = !!b.type && needs.every(t => eqValue(b.eq[t], h).ok);
+  return `<div class="panel"><h3>輪到你選邊並排出算式</h3>
     <div class="row">
       <button class="btn${b.type === 'high' ? ' sel' : ''}" data-act="dtype" data-v="high">賭大（20）</button>
       <button class="btn${b.type === 'low' ? ' sel' : ''}" data-act="dtype" data-v="low">賭小（1）</button>
@@ -683,7 +688,7 @@ function builderHTML(){
     <div class="slots">${slots}</div>
     <div class="pool">${pool}</div>
     <div class="result">${res}</div>
-    <div class="row"><button class="btn" data-act="dclear">清空這條算式</button><button class="btn primary" data-act="declare" ${ready ? '' : 'disabled'}>宣告並開牌</button></div>
+    <div class="row"><button class="btn" data-act="dclear">清空這條算式</button><button class="btn primary" data-act="declare" ${ready ? '' : 'disabled'}>宣告並開牌</button>${b.type ? '' : '<span class="need-side">還沒選賭大、賭小或 Swing</span>'}</div>
   </div>`;
 }
 function render(){
@@ -758,7 +763,15 @@ document.addEventListener('click', (e) => {
   }
   if (a.kind === 'declare'){
     const b = a.b, h = G.players[0].hand, eq = b.eq[b.tab];
-    if (act === 'dtype'){ b.type = el.dataset.v; if (b.type !== 'swing') b.tab = b.type; }
+    if (act === 'dtype'){
+      const t = el.dataset.v, prev = b.tab;
+      b.type = t;
+      if (t !== 'swing'){
+        // Carry the equation already arranged over to the side just picked.
+        if (t !== prev && isEmptyEq(b.eq[t]) && !isEmptyEq(b.eq[prev])){ b.eq[t] = b.eq[prev]; b.eq[prev] = emptyEq(); }
+        b.tab = t;
+      }
+    }
     if (act === 'dtab') b.tab = el.dataset.v;
     if (act === 'pn'){ const k = eq.slots.findIndex((s, i) => i % 2 === 0 && s === null); if (k >= 0) eq.slots[k] = +el.dataset.i; }
     if (act === 'po'){ const k = eq.slots.findIndex((s, i) => i % 2 === 1 && s === null); if (k >= 0) eq.slots[k] = +el.dataset.i; }
@@ -766,6 +779,7 @@ document.addEventListener('click', (e) => {
     if (act === 'sqrt'){ const k = +el.dataset.k; eq.sqrtAt = eq.sqrtAt === k ? -1 : k; }
     if (act === 'dclear') b.eq[b.tab] = emptyEq();
     if (act === 'declare'){
+      if (!b.type) return;
       const needs = b.type === 'swing' ? ['high','low'] : [b.type];
       const r = {}; for (const t of needs){ const v = eqValue(b.eq[t], h); if (!v.ok) return; r[t] = {val:v.val, expr:v.expr}; }
       a.resolve({type:b.type, ...r});
