@@ -21,3 +21,21 @@ a.btn{text-decoration:none;display:inline-block;color:var(--text)}
 .cd.urgent,.pill.timer.urgent{color:var(--danger);border-color:var(--danger)}
 .pill.timer{border-color:var(--brass);color:var(--brass)}
 .pill.off{border-color:#7a3a30;color:var(--danger)}
+
+/* Small phones: opponent cards shrink to fit their seat; very narrow screens use two seats per row */
+@media (max-width:640px){
+  .seat:not(.mine){container-type:inline-size}
+  .seat:not(.mine) .card{--w:min(21px, calc((100cqw - 9px) / 4))}
+}
+@media (max-width:360px){
+  .table{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"s1 s2" "s3 s4" "s5 center" "me me"}
+  .seat:not(.mine) .card{--w:min(24px, calc((100cqw - 9px) / 4))}
+  .slot{min-width:31px;height:46px}
+  .slot.op-slot{min-width:22px;height:30px}
+  .panel .card{--w:29px}
+  .card.big{--w:40px}
+}
+/* Only newly dealt cards animate; redraws do not replay it */
+.card{animation:none}
+.card.fresh{animation:deal .25s ease-out}
+@media (prefers-reduced-motion: reduce){.card.fresh{animation:none}}

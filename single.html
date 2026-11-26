@@ -173,6 +173,24 @@ a.btn{text-decoration:none;display:inline-block;color:var(--text)}
   .slot.op-slot{min-width:26px;height:32px;margin-top:10px}
   .log{max-height:240px}
 }
+
+/* Small phones: opponent cards shrink to fit their seat; very narrow screens use two seats per row */
+@media (max-width:640px){
+  .seat:not(.mine){container-type:inline-size}
+  .seat:not(.mine) .card{--w:min(21px, calc((100cqw - 9px) / 4))}
+}
+@media (max-width:360px){
+  .table{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"s1 s2" "s3 s4" "s5 center" "me me"}
+  .seat:not(.mine) .card{--w:min(24px, calc((100cqw - 9px) / 4))}
+  .slot{min-width:31px;height:46px}
+  .slot.op-slot{min-width:22px;height:30px}
+  .panel .card{--w:29px}
+  .card.big{--w:40px}
+}
+/* Only newly dealt cards animate; redraws do not replay it */
+.card{animation:none}
+.card.fresh{animation:deal .25s ease-out}
+@media (prefers-reduced-motion: reduce){.card.fresh{animation:none}}
 </style>
 </head>
 <body>
@@ -607,8 +625,9 @@ function eqValue(eq, h){
 
 /* ---------- rendering ---------- */
 const $ = s => document.querySelector(s);
+const SEEN = {};
 function cardHTML(n, opts = {}){
-  const size = opts.size ? ' ' + opts.size : '';
+  const size = (opts.size ? ' ' + opts.size : '') + (opts.fresh ? ' fresh' : '');
   if (opts.back) return `<div class="card back${size}" aria-label="暗牌"></div>`;
   return `<div class="card t${n.c}${size}" aria-label="${TIER[n.c]} ${n.v}">${opts.sqrt ? '<span class="sqrt-mark">√</span>' : ''}${n.hidden ? '<span class="hid">暗</span>' : ''}${n.v}<span class="tier">${TIER[n.c]}</span></div>`;
 }
@@ -622,7 +641,9 @@ function seatHTML(p, isMe){
   if (G.result && G.result.winners && G.result.winners.includes(p)) cls.push('win');
   let cards = '', ops = '', sub = [], eq = '';
   if (h){
-    cards = h.nums.map(n => (n.hidden && !isMe && !h.revealed) ? cardHTML(n, {back:true, size: isMe ? 'big' : ''}) : cardHTML(n, {size: isMe ? 'big' : ''})).join('');
+    const seen = (SEEN[p.i] || 0) > h.nums.length ? 0 : (SEEN[p.i] || 0);
+    cards = h.nums.map((n, k) => (n.hidden && !isMe && !h.revealed) ? cardHTML(n, {back:true, size: isMe ? 'big' : '', fresh:k >= seen}) : cardHTML(n, {size: isMe ? 'big' : '', fresh:k >= seen})).join('');
+    SEEN[p.i] = h.nums.length;
     ops = h.ops.map(o => `<span class="op${o === '*' ? ' special' : ''}">${OPD[o]}</span>`).join('') + (h.sqrt ? '<span class="op special">√</span>' : '');
     sub.push(`本局投入 ${h.contrib}`);
     if (h.act) sub.push(`<span class="pill${h.folded ? ' bad' : ''}">${h.act}</span>`);
@@ -637,6 +658,7 @@ function seatHTML(p, isMe){
     h.tags.forEach(([k, t]) => sub.push(`<span class="pill ${k}">${t}</span>`));
   } else if (p.out) sub.push('<span class="pill bad">已淘汰</span>');
   else sub.push('等待發牌');
+  if (!h) SEEN[p.i] = 0;
   return `<section class="${cls.join(' ')}" style="grid-area:${isMe ? 'auto' : 's' + p.i}" aria-label="${p.name}">
     <div class="seat-head"><span class="seat-name">${p.name}${G.button === p.i ? ' <span class="pill">莊位</span>' : ''}</span><span class="seat-chips">${p.chips} 枚</span></div>
     <div class="seat-sub">${sub.join('')}</div>

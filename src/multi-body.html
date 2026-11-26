@@ -790,8 +790,9 @@ function sendDraft(){
 }
 
 /* ---------- drawing the table ---------- */
+const SEEN = {};
 function cardHTML(n, opts = {}){
-  const size = opts.size ? ' ' + opts.size : '';
+  const size = (opts.size ? ' ' + opts.size : '') + (opts.fresh ? ' fresh' : '');
   if (n.back) return `<div class="card back${size}" aria-label="暗牌"></div>`;
   return `<div class="card t${n.c}${size}" aria-label="${TIER[n.c]} ${n.v}">${opts.sqrt ? '<span class="sqrt-mark">√</span>' : ''}${n.hidden ? '<span class="hid">暗</span>' : ''}${n.v}<span class="tier">${TIER[n.c]}</span></div>`;
 }
@@ -808,7 +809,9 @@ function seatHTML(p, isMe, area){
   if (!p.connected) sub.push('<span class="pill off">離線</span>');
   if (V.turn === p.i && V.localDeadline) sub.push(`<span class="pill timer" data-dl="${V.localDeadline}"></span>`);
   if (h){
-    cards = h.nums.map(n => cardHTML(n, {size:isMe ? 'big' : ''})).join('');
+    const seen = (SEEN[p.i] || 0) > h.nums.length ? 0 : (SEEN[p.i] || 0);
+    cards = h.nums.map((n, k) => cardHTML(n, {size:isMe ? 'big' : '', fresh:k >= seen})).join('');
+    SEEN[p.i] = h.nums.length;
     ops = h.ops.map(o => `<span class="op${o === '*' ? ' special' : ''}">${OPD[o]}</span>`).join('') + (h.sqrt ? '<span class="op special">√</span>' : '');
     sub.push(`本局投入 ${h.contrib}`);
     if (h.act) sub.push(`<span class="pill${h.folded ? ' bad' : ''}">${esc(h.act)}</span>`);
@@ -822,6 +825,7 @@ function seatHTML(p, isMe, area){
   } else if (p.out) sub.push('<span class="pill bad">已淘汰</span>');
   else if (V.hand && !p.connected) sub.push('本局暫停');
   else sub.push('等待發牌');
+  if (!h) SEEN[p.i] = 0;
   return `<section class="${cls.join(' ')}" style="grid-area:${area}" aria-label="${esc(p.name)}">
     <div class="seat-head"><span class="seat-name">${esc(p.name)}${isMe ? '（你）' : ''}${V.button === p.i ? ' <span class="pill">莊位</span>' : ''}${p.host ? ' <span class="pill hi">房主</span>' : ''}</span><span class="seat-chips">${p.chips} 枚</span></div>
     <div class="seat-sub">${sub.join('')}</div>
