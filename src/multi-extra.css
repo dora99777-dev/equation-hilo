@@ -1,0 +1,23 @@
+
+/* ---- multiplayer: lobby / waiting room ---- */
+a.btn{text-decoration:none;display:inline-block;color:var(--text)}
+.invite .btn{white-space:nowrap;flex:none}
+.room-tag{font-family:var(--f-mono);color:var(--brass);font-size:13px;letter-spacing:.08em}
+.pre{grid-column:1/-1;grid-row:2;display:flex;flex-direction:column;gap:14px;min-width:0}
+.pre-grid,.wait-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:14px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);min-width:0}
+.field input,.invite input{background:#0c1a16;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font:inherit;font-size:16px;width:100%;min-width:0}
+#join-code{font-family:var(--f-mono);letter-spacing:.3em;text-transform:uppercase}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.check{display:flex;gap:8px;align-items:center;font-size:14px}
+.check input{width:18px;height:18px;accent-color:var(--brass)}
+.code{font-family:var(--f-mono);font-size:46px;letter-spacing:.25em;color:var(--brass);font-weight:600;line-height:1.1}
+.invite{display:flex;gap:8px}
+.setlist{margin:0;padding-left:18px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.roster{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.roster li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(0,0,0,.2)}
+.pre-msg{min-height:20px;color:var(--danger);margin:0}
+.cd{font-family:var(--f-mono);font-size:12px;color:var(--muted);letter-spacing:0;margin-left:6px}
+.cd.urgent,.pill.timer.urgent{color:var(--danger);border-color:var(--danger)}
+.pill.timer{border-color:var(--brass);color:var(--brass)}
+.pill.off{border-color:#7a3a30;color:var(--danger)}

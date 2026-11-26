@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>等式高低 · 多人連線</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700;900&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>[hidden]{display:none!important}body{margin:0}img{max-width:100%}</style>
+<style>
+/* Layout: a felt card table. Opponents ring the top, dealer and pot sit in the middle, your hand is anchored at the bottom; the dealer's log runs beside it. Single dark "casino at night" look, chosen on purpose. */
+:root{
+  --ink:#0b1412;          /* room */
+  --felt:#123229;         /* table */
+  --felt-hi:#1a473a;
+  --rail:#3b2618;         /* wooden rail */
+  --text:#ede6d3;
+  --muted:#9db3a8;
+  --brass:#d3ac55;        /* accent */
+  --oxblood:#6b1f2a;
+  --danger:#e07a63;
+  --ok:#86d3a3;
+  --panel:#0f1f1b;
+  --line:#2a4a40;
+  --t3a:#f6dd92; --t3b:#b98a2f; --t3t:#3a2608;
+  --t2a:#f1f4f6; --t2b:#98a4ad; --t2t:#1d2a31;
+  --t1a:#eab184; --t1b:#8b4e28; --t1t:#2b1205;
+  --t0a:#34343a; --t0b:#0c0c0f; --t0t:#efe8d6;
+  --f-display:"Noto Serif TC", "Songti TC", serif;
+  --f-body:"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{background:var(--ink);color:var(--text)}
+body{font-family:var(--f-body);font-size:14px;line-height:1.5}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+.app{max-width:1240px;margin:0 auto;padding-block:14px 28px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));display:grid;gap:14px;grid-template-columns:minmax(0,1fr) 290px;grid-template-areas:"top top" "table log"}
+@media (max-width:960px){.app{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "table" "log"}}
+
+.top{grid-area:top;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.brand h1{font-family:var(--f-display);font-weight:900;font-size:clamp(24px,3.4vw,34px);margin:0;letter-spacing:.04em}
+.brand h1 b{color:var(--brass)}
+.brand small{color:var(--muted);font-size:13px}
+.top-tools{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 14px;border-radius:8px;font-weight:500;transition:background .15s,border-color .15s}
+.btn:hover:not(:disabled){border-color:var(--brass)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.primary{background:var(--brass);color:#22170a;border-color:var(--brass);font-weight:700}
+.btn.primary:hover:not(:disabled){background:#e4c06c}
+.btn.danger{border-color:#7a3a30;color:var(--danger)}
+.btn.sel{border-color:var(--brass);background:#2b2614;color:var(--brass)}
+
+.table{grid-area:table;min-width:0;position:relative;border-radius:28px;padding:16px;background:radial-gradient(ellipse at 50% 45%, var(--felt-hi), var(--felt) 70%);border:10px solid var(--rail);box-shadow:inset 0 0 0 2px #5a3b24, inset 0 0 60px rgba(0,0,0,.45);display:grid;gap:12px;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:"s2 s3 s4" "s1 center s5" "me me me"}
+@media (max-width:640px){.table{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"s1 s2" "s3 s4" "s5 center" "me me";padding:10px;border-width:7px;border-radius:20px}}
+
+.seat{min-width:0;background:rgba(6,16,13,.55);border:1px solid rgba(211,172,85,.18);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:6px;transition:border-color .2s, box-shadow .2s, opacity .2s}
+.seat.turn{border-color:var(--brass);box-shadow:0 0 0 2px rgba(211,172,85,.35)}
+.seat.folded{opacity:.5}
+.seat.out{opacity:.3;filter:grayscale(1)}
+.seat.win{border-color:var(--ok);box-shadow:0 0 0 2px rgba(134,211,163,.35)}
+.seat-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.seat-name{font-weight:700;font-size:15px}
+.seat-chips{font-family:var(--f-mono);font-variant-numeric:tabular-nums;color:var(--brass);font-weight:600}
+.seat-sub{font-size:12px;color:var(--muted);min-height:18px;display:flex;flex-wrap:wrap;gap:4px 8px}
+.pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--text);letter-spacing:.04em}
+.pill.hi{border-color:#a97f2b;color:#f1cf7a}
+.pill.lo{border-color:#3f7f99;color:#9fd6ea}
+.pill.sw{border-color:#8f4c9c;color:#e2a8ee}
+.pill.bad{border-color:#7a3a30;color:var(--danger)}
+.pill.good{border-color:#3b7f55;color:var(--ok)}
+.cards{display:flex;gap:5px;flex-wrap:wrap;min-height:50px;align-items:flex-end}
+.ops{display:flex;gap:4px;flex-wrap:wrap}
+.op{font-family:var(--f-mono);font-weight:600;min-width:24px;height:24px;display:inline-grid;place-items:center;border-radius:6px;background:#0c1a16;border:1px solid var(--line);font-size:14px}
+.op.special{border-color:var(--brass);color:var(--brass)}
+.eqline{font-family:var(--f-mono);font-size:12.5px;background:rgba(0,0,0,.28);border-radius:8px;padding:5px 8px;overflow-wrap:anywhere}
+.eqline em{font-style:normal;color:var(--brass)}
+
+.card{--w:36px;width:var(--w);height:calc(var(--w)*1.4);border-radius:6px;display:grid;place-items:center;position:relative;font-family:var(--f-display);font-weight:900;font-size:calc(var(--w)*.5);box-shadow:0 2px 4px rgba(0,0,0,.4);flex:none;animation:deal .25s ease-out}
+.card .tier{position:absolute;bottom:2px;right:4px;font-family:var(--f-body);font-weight:700;font-size:calc(var(--w)*.22)}
+.card .hid{position:absolute;top:2px;left:4px;font-family:var(--f-body);font-weight:700;font-size:calc(var(--w)*.22);opacity:.75}
+.card.t3{background:linear-gradient(160deg,var(--t3a),var(--t3b));color:var(--t3t)}
+.card.t2{background:linear-gradient(160deg,var(--t2a),var(--t2b));color:var(--t2t)}
+.card.t1{background:linear-gradient(160deg,var(--t1a),var(--t1b));color:var(--t1t)}
+.card.t0{background:linear-gradient(160deg,var(--t0a),var(--t0b));color:var(--t0t);border:1px solid #57575f}
+.card.back{background:repeating-linear-gradient(45deg,var(--oxblood) 0 5px,#4e1620 5px 10px);border:2px solid var(--brass)}
+.card.big{--w:52px}
+.card.mini{--w:30px}
+@keyframes deal{from{transform:translateY(-8px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion: reduce){.card{animation:none}.seat{transition:none}}
+
+.center{grid-area:center;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:8px}
+.dealer{font-family:var(--f-display);font-weight:900;font-size:13px;letter-spacing:.3em;color:var(--brass)}
+.phase{font-size:13px;color:var(--muted)}
+.pot{font-family:var(--f-mono);font-size:clamp(28px,4vw,40px);font-weight:600;color:var(--text);line-height:1.1;font-variant-numeric:tabular-nums}
+.pot-label{font-size:11px;color:var(--muted);letter-spacing:.2em}
+.stats{display:grid;grid-template-columns:auto auto;gap:2px 10px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.stats b{color:var(--text);font-family:var(--f-mono);font-weight:500;text-align:left}
+.stats span{text-align:right}
+
+.me{grid-area:me;min-width:0;display:grid;gap:10px;grid-template-columns:minmax(0,260px) minmax(0,1fr)}
+@media (max-width:720px){.me{grid-template-columns:minmax(0,1fr)}}
+.me .seat{background:rgba(6,16,13,.7)}
+.panel{min-width:0;background:rgba(6,16,13,.7);border:1px solid rgba(211,172,85,.25);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.panel h3{margin:0;font-size:13px;letter-spacing:.12em;color:var(--brass);font-weight:700}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.stepper button{background:#0c1a16;border:0;width:32px;height:34px;font-size:16px}
+.stepper output{min-width:44px;text-align:center;font-family:var(--f-mono);font-weight:600}
+.hint{font-size:12.5px;color:var(--muted);margin:0}
+
+.slots{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start}
+.slot{min-width:44px;height:68px;border:1.5px dashed var(--line);border-radius:8px;display:grid;place-items:center;background:rgba(0,0,0,.2);padding:0}
+.slot.op-slot{min-width:34px;height:40px;margin-top:14px}
+.slot.filled{border-style:solid;border-color:transparent;background:none}
+.numwrap{display:flex;flex-direction:column;align-items:center;gap:3px}
+.sqrt-tog{font-size:11px;padding:0 6px;border-radius:6px;border:1px solid var(--line);background:#0c1a16;height:20px}
+.sqrt-tog.on{border-color:var(--brass);color:#22170a;background:var(--brass)}
+.sqrt-mark{position:absolute;top:-2px;left:-4px;background:var(--brass);color:#22170a;border-radius:4px;font-size:12px;padding:0 3px;font-family:var(--f-mono)}
+.pool{display:flex;flex-wrap:wrap;gap:6px}
+.pool button{background:none;border:0;padding:0}
+.result{font-family:var(--f-mono);font-size:15px}
+.result .ok{color:var(--ok)} .result .bad{color:var(--danger)}
+
+.log{grid-area:log;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 120px);position:sticky;top:max(12px, env(safe-area-inset-top, 0px));align-self:start}
+@media (max-width:960px){.log{position:static;max-height:320px}}
+.log h2{margin:0;font-family:var(--f-display);font-size:15px;letter-spacing:.15em;color:var(--brass)}
+.log ol{list-style:none;margin:0;padding:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.log li{border-left:2px solid var(--line);padding-left:8px;color:var(--muted)}
+.log li.h{border-color:var(--brass);color:var(--text);font-weight:500}
+
+.modal{position:fixed;inset:0;background:rgba(3,8,7,.72);display:grid;place-items:center;padding:16px;z-index:20}
+.modal-box{width:min(620px,100%);max-height:88vh;overflow-y:auto;background:var(--panel);border:1px solid var(--brass);border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.modal-box h2{margin:0;font-family:var(--f-display);font-weight:900;font-size:24px}
+.modal-box h4{margin:8px 0 0;color:var(--brass);font-size:14px;letter-spacing:.08em}
+.modal-box ul,.modal-box ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.modal-box p{margin:0}
+.rank{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.rank td{padding:6px 4px;border-bottom:1px solid var(--line)}
+.rank td:last-child{text-align:right;font-family:var(--f-mono);color:var(--brass)}
+
+/* Phone: three compact opponent seats per row, so the whole table and your hand fit in about one screen */
+@media (max-width:640px){
+  .brand small{display:none}
+  .btn{padding:6px 11px}
+  .table{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:"s1 s2 s3" "s4 s5 center" "me me me";gap:7px;padding:8px}
+  .seat{padding:7px;gap:4px;border-radius:10px}
+  .seat-name{font-size:13px}
+  .seat-chips{font-size:12px}
+  .seat-head{flex-wrap:wrap;gap:0 4px}
+  .seat-sub{font-size:10.5px;gap:2px 4px;min-height:0}
+  .pill{font-size:10px;padding:0 5px}
+  .seat:not(.mine) .card{--w:21px}
+  .seat:not(.mine) .cards{gap:3px;min-height:30px;flex-wrap:nowrap}
+  .seat:not(.mine) .op{min-width:17px;height:17px;font-size:11px;border-radius:4px}
+  .seat:not(.mine) .ops{gap:3px}
+  .seat:not(.mine) .eqline{font-size:10px;padding:3px 5px}
+  .card.big{--w:46px}
+  .center{padding:2px;gap:2px}
+  .dealer{font-size:11px}
+  .phase{font-size:11px}
+  .pot{font-size:26px}
+  .stats{font-size:10.5px;gap:0 6px}
+  .panel{padding:10px;gap:8px}
+  .panel .card{--w:34px}
+  .slots{gap:4px}
+  .slot{min-width:36px;height:52px}
+  .slot.op-slot{min-width:26px;height:32px;margin-top:10px}
+  .log{max-height:240px}
+}
+
+/* ---- multiplayer: lobby / waiting room ---- */
+a.btn{text-decoration:none;display:inline-block;color:var(--text)}
+.invite .btn{white-space:nowrap;flex:none}
+.room-tag{font-family:var(--f-mono);color:var(--brass);font-size:13px;letter-spacing:.08em}
+.pre{grid-column:1/-1;grid-row:2;display:flex;flex-direction:column;gap:14px;min-width:0}
+.pre-grid,.wait-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:14px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);min-width:0}
+.field input,.invite input{background:#0c1a16;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 10px;font:inherit;font-size:16px;width:100%;min-width:0}
+#join-code{font-family:var(--f-mono);letter-spacing:.3em;text-transform:uppercase}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.check{display:flex;gap:8px;align-items:center;font-size:14px}
+.check input{width:18px;height:18px;accent-color:var(--brass)}
+.code{font-family:var(--f-mono);font-size:46px;letter-spacing:.25em;color:var(--brass);font-weight:600;line-height:1.1}
+.invite{display:flex;gap:8px}
+.setlist{margin:0;padding-left:18px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.roster{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.roster li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(0,0,0,.2)}
+.pre-msg{min-height:20px;color:var(--danger);margin:0}
+.cd{font-family:var(--f-mono);font-size:12px;color:var(--muted);letter-spacing:0;margin-left:6px}
+.cd.urgent,.pill.timer.urgent{color:var(--danger);border-color:var(--danger)}
+.pill.timer{border-color:var(--brass);color:var(--brass)}
+.pill.off{border-color:#7a3a30;color:var(--danger)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><h1>等式<b>高低</b></h1><small>多人連線</small><span class="room-tag" id="roomTag"></span></div>
+    <div class="top-tools">
+      <a class="btn" href="index.html">大廳</a>
+      <button class="btn" data-act="rules">規則</button>
+    </div>
+  </header>
+  <section class="pre" id="pre"></section>
+  <main class="table" id="table" hidden></main>
+  <aside class="log" id="logbox" hidden><h2>荷官紀錄</h2><ol id="log"></ol></aside>
+</div>
+<div id="modal"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+"use strict";
+/* =========================================================
+   等式高低 · 多人連線
+   架構：房主的瀏覽器是「荷官」（唯一的遊戲狀態），
+   其他玩家透過 PeerJS (WebRTC) 連進來，只收到自己能看的畫面資料，
+   輪到自己時收到 prompt，回傳動作。
+   ========================================================= */
+const OPD = {'+':'+','-':'−','*':'×','/':'÷'};
+const TIER = ['黑','銅','銀','金'];
+const AI_ROSTER = [
+  {name:'阿凱', agg:.78}, {name:'小雨', agg:.38}, {name:'老周', agg:.55}, {name:'米拉', agg:.66}, {name:'德生', agg:.30},
+];
+const ANTE = 1, EPS = 1e-9;
+const PREFIX = 'eqhilo-v1-';
+const ALPH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const PEER_OPTS = Object.assign({debug:1}, window.EQ_PEER_OPTS || {});
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+function cleanName(s){ return String(s || '').replace(/[<>&"'`\\]/g, '').trim().slice(0, 12); }
+function getCid(){
+  let c = lsGet('eqhilo.cid');
+  if (!c){ c = Math.random().toString(36).slice(2) + Date.now().toString(36); lsSet('eqhilo.cid', c); }
+  return c;
+}
+
+/* ---------- engine (same rules as the original) ---------- */
+function buildDeck(){
+  const d = [];
+  for (let v = 0; v <= 10; v++) for (let c = 0; c < 4; c++) d.push({t:'n', v, c});
+  for (let k = 0; k < 4; k++){ d.push({t:'sqrt'}); d.push({t:'mul'}); }
+  return shuffle(d);
+}
+function shuffle(a){ for (let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function evalEq(vals, ops, sqrtAt){
+  const v = vals.map((x, i) => i === sqrtAt ? Math.sqrt(x) : x);
+  const terms = [v[0]], addOps = [];
+  for (let i = 0; i < 3; i++){
+    const op = ops[i], b = v[i + 1];
+    if (op === '*') terms[terms.length - 1] *= b;
+    else if (op === '/'){ if (Math.abs(b) < EPS) return null; terms[terms.length - 1] /= b; }
+    else { addOps.push(op); terms.push(b); }
+  }
+  let r = terms[0];
+  addOps.forEach((op, j) => { r = op === '+' ? r + terms[j + 1] : r - terms[j + 1]; });
+  return r;
+}
+function perms(arr){
+  if (arr.length <= 1) return [arr.slice()];
+  const out = [], seen = new Set();
+  arr.forEach((x, i) => {
+    perms(arr.slice(0, i).concat(arr.slice(i + 1))).forEach(p => {
+      const q = [x, ...p], key = q.join(',');
+      if (!seen.has(key)){ seen.add(key); out.push(q); }
+    });
+  });
+  return out;
+}
+const IDX_PERMS = perms([0,1,2,3]);
+function search(vals, ops, hasSqrt){
+  const opPerms = perms(ops);
+  const sq = hasSqrt ? [0,1,2,3] : [-1];
+  let hi = null, lo = null;
+  for (const ord of IDX_PERMS){
+    const v = ord.map(i => vals[i]);
+    for (const op of opPerms) for (const s of sq){
+      const r = evalEq(v, op, s);
+      if (r === null) continue;
+      const hd = Math.abs(r - 20), ld = Math.abs(r - 1);
+      if (!hi || hd < hi.dist - EPS) hi = {val:r, dist:hd, expr:{order:ord, ops:op, sqrtAt:s}};
+      if (!lo || ld < lo.dist - EPS) lo = {val:r, dist:ld, expr:{order:ord, ops:op, sqrtAt:s}};
+    }
+  }
+  return {high:hi, low:lo};
+}
+function fmt(x){
+  if (x === null || x === undefined) return '—';
+  const r = Math.round(x * 1000) / 1000;
+  return Number.isInteger(r) ? String(r) : r.toFixed(3).replace(/0+$/, '');
+}
+function exprText(hand, expr){
+  let s = '';
+  for (let k = 0; k < 4; k++){
+    const n = hand.nums[expr.order[k]];
+    s += (expr.sqrtAt === k ? '√' : '') + n.v;
+    if (k < 3) s += ' ' + OPD[expr.ops[k]] + ' ';
+  }
+  return s;
+}
+function keyCard(cards, side){
+  return cards.reduce((best, c) => {
+    if (!best) return c;
+    if (side === 'high') return (c.v > best.v || (c.v === best.v && c.c > best.c)) ? c : best;
+    return (c.v < best.v || (c.v === best.v && c.c < best.c)) ? c : best;
+  }, null);
+}
+function beats(side, a, b){
+  const t = side === 'high' ? 20 : 1;
+  const da = Math.abs(a.val - t), db = Math.abs(b.val - t);
+  if (Math.abs(da - db) > EPS) return da < db;
+  const ka = keyCard(a.cards, side), kb = keyCard(b.cards, side);
+  if (side === 'high') return ka.v > kb.v || (ka.v === kb.v && ka.c > kb.c);
+  return ka.v < kb.v || (ka.v === kb.v && ka.c < kb.c);
+}
+function sideBest(side, list){ return list.reduce((best, x) => (!best || beats(side, x.entry, best.entry)) ? x : best, null); }
+function emptyEq(){ return {slots:[null,null,null,null,null,null,null], sqrtAt:-1}; }
+function eqValue(eq, h){
+  if (eq.slots.some(s => s === null)) return {ok:false, why:'算式還沒排完'};
+  if (h.sqrt && eq.sqrtAt < 0) return {ok:false, why:'√ 必須套用在一個數字上'};
+  const vals = [0,1,2,3].map(k => h.nums[eq.slots[2 * k]].v);
+  const ops = [0,1,2].map(j => h.ops[eq.slots[2 * j + 1]]);
+  const r = evalEq(vals, ops, h.sqrt ? eq.sqrtAt : -1);
+  if (r === null) return {ok:false, why:'不能除以 0'};
+  return {ok:true, val:r, expr:{order:[0,1,2,3].map(k => eq.slots[2 * k]), ops, sqrtAt:h.sqrt ? eq.sqrtAt : -1}};
+}
+function validEq(e){
+  if (!e || !Array.isArray(e.slots) || e.slots.length !== 7) return false;
+  const ns = [0,2,4,6].map(i => e.slots[i]), os = [1,3,5].map(i => e.slots[i]);
+  const okSet = (arr, n) => arr.every(x => Number.isInteger(x) && x >= 0 && x < n) && new Set(arr).size === n;
+  return okSet(ns, 4) && okSet(os, 3);
+}
+// Host-side: turn a raw declaration {type, eqs} from a player into a checked one.
+function buildDecl(h, raw){
+  if (!raw || !['high','low','swing'].includes(raw.type) || !raw.eqs) return null;
+  const needs = raw.type === 'swing' ? ['high','low'] : [raw.type];
+  const d = {type:raw.type};
+  for (const t of needs){
+    const e = raw.eqs[t];
+    if (!validEq(e)) return null;
+    const sq = Number.isInteger(e.sqrtAt) && e.sqrtAt >= 0 && e.sqrtAt <= 3 ? e.sqrtAt : -1;
+    const r = eqValue({slots:e.slots.slice(), sqrtAt:sq}, h);
+    if (!r.ok) return null;
+    d[t] = {val:r.val, expr:r.expr};
+  }
+  return d;
+}
+
+/* ---------- AI (same as single player) ---------- */
+function strength(hand){
+  const vals = hand.nums.map(n => n.v);
+  const samples = vals.length >= 4 ? 1 : 12;
+  let sh = 0, sl = 0;
+  for (let s = 0; s < samples; s++){
+    const v = vals.slice();
+    while (v.length < 4) v.push(Math.floor(Math.random() * 11));
+    const b = search(v, hand.ops, hand.sqrt);
+    sh += b.high ? Math.exp(-b.high.dist * 0.45) : 0;
+    sl += b.low ? Math.exp(-b.low.dist * 1.1) : 0;
+  }
+  sh /= samples; sl /= samples;
+  if (vals.length && Math.max(...vals) >= 9) sh += 0.08;
+  if (vals.length && Math.min(...vals) <= 1) sl += 0.08;
+  return Math.max(sh, sl * 0.85);
+}
+function aiBet(p, toCall){
+  const s = strength(p.hand) + (Math.random() * 0.24 - 0.1) + (p.agg - 0.5) * 0.2;
+  const canRaise = G.level < G.cap;
+  const raiseTo = () => Math.min(G.cap, G.level + 1 + Math.floor(Math.random() * (1 + p.agg * 3)));
+  if (toCall === 0){
+    if (canRaise && s > 0.62 && Math.random() < 0.35 + p.agg * 0.5) return {a:'raise', to:raiseTo()};
+    return {a:'check'};
+  }
+  if (canRaise && s > 0.8 && Math.random() < p.agg * 0.6) return {a:'raise', to:raiseTo()};
+  if (s > 0.3 + toCall * 0.045) return {a:'call'};
+  return {a:'fold'};
+}
+function aiSurrender(p){
+  const options = [...new Set(p.hand.ops.filter(o => o === '+' || o === '-' || o === '*'))];
+  let best = options[0], bs = -1;
+  for (const o of options){
+    const ops = p.hand.ops.slice(); ops.splice(ops.indexOf(o), 1);
+    const s = strength({...p.hand, ops});
+    if (s > bs){ bs = s; best = o; }
+  }
+  return best;
+}
+function aiDeclare(p){
+  const h = p.hand;
+  const b = search(h.nums.map(n => n.v), h.ops, h.sqrt);
+  const eh = {val:b.high.val, cards:h.nums}, el = {val:b.low.val, cards:h.nums};
+  const shown = G.players.filter(q => q.hand && q.hand.decl && !q.hand.folded);
+  const curHi = sideBest('high', shown.filter(q => q.hand.decl.type !== 'low').map(q => ({p:q, entry:{val:q.hand.decl.high.val, cards:q.hand.nums}})));
+  const curLo = sideBest('low', shown.filter(q => q.hand.decl.type !== 'high').map(q => ({p:q, entry:{val:q.hand.decl.low.val, cards:q.hand.nums}})));
+  const winHi = !curHi || beats('high', eh, curHi.entry);
+  const winLo = !curLo || beats('low', el, curLo.entry);
+  const mk = r => ({val:r.val, expr:r.expr});
+  if (winHi && winLo && b.high.dist < 0.5 && b.low.dist < 0.15 && Math.random() < 0.35 + p.agg * 0.5)
+    return {type:'swing', high:mk(b.high), low:mk(b.low)};
+  let type;
+  if (winHi && !winLo) type = 'high';
+  else if (winLo && !winHi) type = 'low';
+  else {
+    const sh = Math.exp(-b.high.dist * 0.45), sl = Math.exp(-b.low.dist * 1.1);
+    type = sh + Math.random() * 0.1 >= sl + Math.random() * 0.1 ? 'high' : 'low';
+  }
+  return type === 'high' ? {type, high:mk(b.high)} : {type, low:mk(b.low)};
+}
+
+/* ---------- session state ---------- */
+const myCid = getCid();
+let role = null;        // 'host' | 'client'
+let peer = null, hostConn = null, roomCode = '';
+let screen = 'home';    // home | wait | game
+let S = null;           // room settings
+let lobby = [];         // host: [{cid, name, host, conn}]
+let lobbyView = null;   // client: last lobby message
+let G = null, gidSeq = 0;
+let V = null;           // view being drawn (host: own view)
+let A = null;           // my pending prompt
+let mySeat = 0, myName = lsGet('eqhilo.name') || '';
+let rankShown = false, lastShown = null, leaving = false;
+const urlCode = (new URLSearchParams(location.search).get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+
+function safeSend(c, msg){ try { if (c && c.open) c.send(msg); } catch (e) {} }
+function genCode(){ let s = ''; for (let i = 0; i < 4; i++) s += ALPH[Math.floor(Math.random() * ALPH.length)]; return s; }
+function inviteLink(){ return location.origin + location.pathname + '?room=' + roomCode; }
+function errText(e){
+  const t = e && e.type;
+  if (t === 'peer-unavailable') return '找不到這個房號。請確認房號正確，而且房主還開著房間。';
+  if (t === 'browser-incompatible') return '這個瀏覽器不支援連線，請改用新版 Chrome、Safari 或 Edge。';
+  if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed' || t === 'timeout')
+    return '連不上連線伺服器。請檢查網路；公司或學校網路可能會擋，可以改用手機熱點再試。';
+  return '連線發生錯誤（' + (t || '未知') + '），請重新整理後再試。';
+}
+function openPeer(id){
+  return new Promise((res, rej) => {
+    let done = false;
+    const p = id ? new Peer(id, PEER_OPTS) : new Peer(PEER_OPTS);
+    const to = setTimeout(() => { if (!done){ done = true; try { p.destroy(); } catch (e) {} rej({type:'timeout'}); } }, 15000);
+    p.on('open', () => { if (!done){ done = true; clearTimeout(to); res(p); } });
+    p.on('error', e => { if (!done){ done = true; clearTimeout(to); try { p.destroy(); } catch (x) {} rej(e); } });
+  });
+}
+function setupPeer(){
+  peer.on('disconnected', () => { if (!leaving && !peer.destroyed){ try { peer.reconnect(); } catch (e) {} } });
+  peer.on('error', e => {
+    if (role === 'client' && e.type === 'peer-unavailable'){
+      if (screen === 'home') setMsg(errText(e)); else onHostLost();
+    } else if (screen === 'home') setMsg(errText(e));
+  });
+}
+function setMsg(t){
+  const el = $('#preMsg');
+  if (el && !$('#pre').hidden) el.textContent = t;
+  else openModal(`<h2>提示</h2><p>${esc(t)}</p><div class="row"><button class="btn primary" data-act="close">知道了</button></div>`);
+}
+
+/* ---------- pre-game screens ---------- */
+function drawPre(){
+  $('#pre').hidden = false; $('#table').hidden = true; $('#logbox').hidden = true;
+  $('#roomTag').textContent = roomCode ? `房號 ${roomCode}` : '';
+  $('#pre').innerHTML = screen === 'wait' ? waitHTML() : homeHTML();
+}
+function homeHTML(){
+  const join = `<section class="panel${urlCode ? ' first' : ''}">
+      <h3>加入房間</h3>
+      <label class="field">房號<input id="join-code" maxlength="4" autocomplete="off" autocapitalize="characters" value="${esc(urlCode)}" placeholder="例如 K7QF"></label>
+      <label class="field">你的暱稱<input id="nm-join" maxlength="12" value="${esc(myName)}" placeholder="最多 12 個字"></label>
+      <div class="row"><button class="btn primary" data-act="join">加入</button></div>
+      <p class="hint">輸入房主給你的 4 碼房號；點邀請連結進來的話，房號已經幫你填好。</p>
+    </section>`;
+  const create = `<section class="panel">
+      <h3>開新房間</h3>
+      <label class="field">你的暱稱<input id="nm-host" maxlength="12" value="${esc(myName)}" placeholder="最多 12 個字"></label>
+      <label class="check"><input type="checkbox" id="opt-ai" checked> 空位補電腦玩家（補滿六人桌）</label>
+      <label class="check"><input type="checkbox" id="opt-timer" checked> 行動計時（時間到自動處理）</label>
+      <div class="field-row">
+        <label class="field">下注秒數<input type="number" id="opt-bet" value="30" min="10" max="300" inputmode="numeric"></label>
+        <label class="field">排算式秒數<input type="number" id="opt-decl" value="90" min="20" max="600" inputmode="numeric"></label>
+      </div>
+      <div class="field-row">
+        <label class="field">起始籌碼<input type="number" id="opt-chips" value="30" min="5" max="500" inputmode="numeric"></label>
+        <label class="field">局數<input type="number" id="opt-hands" value="9" min="1" max="30" inputmode="numeric"></label>
+      </div>
+      <div class="row"><button class="btn primary" data-act="create">建立房間</button></div>
+      <p class="hint">你的瀏覽器會擔任荷官，牌局進行中請不要關掉這個網頁。建議用電腦開房。</p>
+    </section>`;
+  return `<div class="pre-grid">${urlCode ? join + create : create + join}</div><p class="pre-msg" id="preMsg" role="status"></p>`;
+}
+function waitHTML(){
+  const isHost = role === 'host';
+  const players = isHost ? lobby.map(x => ({name:x.name, host:x.host})) : (lobbyView ? lobbyView.players : []);
+  const st = isHost ? S : (lobbyView ? lobbyView.settings : null);
+  if (!st) return '<p class="hint">連線中…</p>';
+  const aiN = st.aiFill ? Math.max(0, 6 - players.length) : 0;
+  const total = players.length + aiN;
+  const roster = players.map(p => `<li><span>${esc(p.name)}${p.name === myName ? '（你）' : ''}</span>${p.host ? '<span class="pill hi">房主</span>' : '<span class="pill">已入座</span>'}</li>`).join('')
+    + AI_ROSTER.slice(0, aiN).map(a => `<li><span>${a.name}</span><span class="pill">電腦</span></li>`).join('');
+  return `<div class="wait-grid">
+    <section class="panel">
+      <h3>房號</h3>
+      <div class="code">${esc(roomCode)}</div>
+      <div class="invite"><input id="invite" readonly value="${esc(inviteLink())}" aria-label="邀請連結"><button class="btn" data-act="copy">複製連結</button></div>
+      <p class="hint" id="copyMsg">把連結或房號傳給朋友，他們填好暱稱就會出現在右邊的名單。</p>
+      <h3>房間設定</h3>
+      <ul class="setlist">
+        <li>空位補電腦：${st.aiFill ? '是' : '否'}</li>
+        <li>行動計時：${st.timer ? `下注 ${st.betSec} 秒、排算式 ${st.declSec} 秒` : '不計時'}</li>
+        <li>起始籌碼 ${st.chips} 枚，共 ${st.hands} 局</li>
+      </ul>
+    </section>
+    <section class="panel">
+      <h3>牌桌名單（${total} / 6）</h3>
+      <ul class="roster">${roster}</ul>
+      ${isHost
+        ? `<div class="row"><button class="btn primary" data-act="start-game" ${total >= 2 ? '' : 'disabled'}>開始遊戲</button></div>
+           <p class="hint">${total >= 2 ? '人到齊就可以開始；開始後就不能再加入新玩家。' : '至少要 2 位玩家才能開始；可以等朋友加入，或勾選補電腦重開房間。'}</p>`
+        : '<p class="hint">等待房主開始遊戲…</p>'}
+    </section>
+  </div><p class="pre-msg" id="preMsg" role="status"></p>`;
+}
+
+/* ---------- host: room & connections ---------- */
+async function doCreate(){
+  const name = cleanName($('#nm-host').value);
+  if (!name) return setMsg('請先輸入暱稱。');
+  if (typeof Peer === 'undefined') return setMsg('連線元件載入失敗，請檢查網路後重新整理。');
+  const num = (id, lo, hi, d) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
+  S = {aiFill:$('#opt-ai').checked, timer:$('#opt-timer').checked, betSec:num('#opt-bet', 10, 300, 30), declSec:num('#opt-decl', 20, 600, 90), chips:num('#opt-chips', 5, 500, 30), hands:num('#opt-hands', 1, 30, 9)};
+  myName = name; lsSet('eqhilo.name', name);
+  setMsg('建立房間中…');
+  peer = null;
+  for (let t = 0; t < 6 && !peer; t++){
+    const code = genCode();
+    try { peer = await openPeer(PREFIX + code); roomCode = code; }
+    catch (e) { if (e && e.type === 'unavailable-id') continue; return setMsg(errText(e)); }
+  }
+  if (!peer) return setMsg('暫時無法建立房間，請再試一次。');
+  role = 'host'; setupPeer();
+  peer.on('connection', onClientConn);
+  lobby = [{cid:myCid, name, host:true, conn:null}];
+  screen = 'wait'; drawPre();
+}
+function onClientConn(c){
+  c._seen = Date.now();
+  c.on('data', m => { c._seen = Date.now(); hostOnMsg(c, m); });
+  c.on('close', () => hostOnClose(c));
+  c.on('error', () => hostOnClose(c));
+}
+function broadcastLobby(){
+  const msg = {type:'lobby', code:roomCode, players:lobby.map(x => ({name:x.name, host:x.host})), settings:S};
+  lobby.forEach(x => { if (x.conn) safeSend(x.conn, msg); });
+}
+function hostOnMsg(c, m){
+  if (!m || typeof m !== 'object') return;
+  if (m.type === 'hello'){
+    const name = cleanName(m.name) || '玩家', cid = String(m.cid || '').slice(0, 40);
+    if (G){
+      const p = G.players.find(q => !q.ai && q.cid === cid);
+      if (!p){ safeSend(c, {type:'reject', reason:'牌局已經開始，不能中途加入。'}); setTimeout(() => { try { c.close(); } catch (e) {} }, 600); return; }
+      const old = p.conn; p.conn = c; p.connected = true;
+      if (old && old !== c) try { old.close(); } catch (e) {}
+      say(`${p.name} 重新連線${G.inHand && p.hand && p.hand.folded ? '，下一局回到牌桌' : ''}。`);
+      render();
+      const req = pending.get(p.i);
+      if (req && req.payload){
+        const left = G.turnDeadline ? Math.max(1000, G.turnDeadline - Date.now()) : 0;
+        setTimeout(() => safeSend(c, {type:'prompt', ...req.payload, ms:left}), 50);
+      }
+      return;
+    }
+    let e = lobby.find(x => x.cid === cid);
+    if (e){ const old = e.conn; e.conn = c; e.name = name; if (old && old !== c) try { old.close(); } catch (x) {} }
+    else {
+      if (lobby.length >= 6){ safeSend(c, {type:'reject', reason:'房間已滿（最多 6 位玩家）。'}); setTimeout(() => { try { c.close(); } catch (x) {} }, 600); return; }
+      lobby.push({cid, name, host:false, conn:c});
+    }
+    broadcastLobby(); drawPre();
+    return;
+  }
+  if (m.type === 'ping' || !G) return;
+  const p = G.players.find(q => q.conn === c);
+  if (!p) return;
+  const req = pending.get(p.i);
+  if (!req || req.id !== m.id) return;
+  if (m.type === 'act') req.resolve(m.value);
+  else if (m.type === 'draft') req.draft = m.draft;
+}
+function hostOnClose(c){
+  if (G){
+    const p = G.players.find(q => q.conn === c);
+    if (!p) return;
+    p.conn = null; p.connected = false;
+    let msg = `${p.name} 斷線了`;
+    if (G.inHand && p.hand && !p.hand.folded){ p.hand.folded = true; p.hand.act = '斷線棄牌'; msg += '，本局自動棄牌'; }
+    say(msg + '。重新進房可以回到座位。');
+    const req = pending.get(p.i);
+    if (req) req.resolve(req.fallback('disconnect'));
+    render();
+    return;
+  }
+  const i = lobby.findIndex(x => x.conn === c);
+  if (i >= 0){ lobby.splice(i, 1); broadcastLobby(); if (screen === 'wait') drawPre(); }
+}
+function hostStart(){
+  const humans = lobby.filter(x => x.host || (x.conn && x.conn.open));
+  const players = humans.map((x, i) => ({i, name:x.name, ai:false, agg:.5, chips:S.chips, out:false, hand:null, cid:x.cid, conn:x.conn, connected:true, isHost:x.host}));
+  if (S.aiFill) for (let k = 0; players.length < 6; k++) players.push({i:players.length, name:AI_ROSTER[k].name, ai:true, agg:AI_ROSTER[k].agg, chips:S.chips, out:false, hand:null, connected:true});
+  if (players.length < 2) return setMsg('至少要 2 位玩家才能開始。');
+  mySeat = 0;
+  G = {id:++gidSeq, hand:0, button:Math.floor(Math.random() * players.length), pot:0, house:0, level:0, cap:0, turn:-1, phase:'準備開始', log:[], over:false, result:null, players, turnDeadline:0, inHand:false};
+  screen = 'game'; rankShown = false;
+  render();
+  hostRun(G.id);
+}
+function hostToLobby(){
+  lobby = G.players.filter(p => !p.ai && (p.isHost || (p.conn && p.conn.open))).map(p => ({cid:p.cid, name:p.name, host:!!p.isHost, conn:p.isHost ? null : p.conn}));
+  pending.forEach(r => r.resolve(r.fallback('disconnect')));
+  G = null; V = null; A = null; rankShown = false;
+  screen = 'wait'; closeModal();
+  broadcastLobby(); drawPre();
+}
+
+/* ---------- host: asking a player to act ---------- */
+let reqSeq = 0;
+const pending = new Map();
+function ask(p, kind, data, ms, fallback){
+  return new Promise(res => {
+    const req = {id:++reqSeq, kind, draft:null, done:false};
+    let timer = null;
+    req.fallback = reason => fallback(reason, req);
+    req.resolve = v => {
+      if (req.done) return;
+      req.done = true; clearTimeout(timer); pending.delete(p.i);
+      if (G) G.turnDeadline = 0;
+      if (p.i === mySeat){ if (A && A.id === req.id) A = null; }
+      else if (p.conn) safeSend(p.conn, {type:'unprompt', id:req.id});
+      res(v);
+    };
+    pending.set(p.i, req);
+    if (!p.connected){ req.resolve(req.fallback('disconnect')); return; }
+    if (ms){ G.turnDeadline = Date.now() + ms; timer = setTimeout(() => req.resolve(req.fallback('timeout')), ms); }
+    const payload = {id:req.id, kind, ms, ...data};
+    req.payload = payload;
+    if (p.i === mySeat) A = makeAwait(payload);
+    else safeSend(p.conn, {type:'prompt', ...payload});
+    render();
+  });
+}
+function makeAwait(payload){
+  const a = {...payload, deadline:payload.ms ? Date.now() + payload.ms : 0};
+  if (a.kind === 'declare') a.b = {type:'high', tab:'high', eq:{high:emptyEq(), low:emptyEq()}};
+  return a;
+}
+
+/* ---------- host: game flow ---------- */
+function say(msg, strong){ if (!G) return; G.log.unshift({msg, strong:!!strong}); if (G.log.length > 120) G.log.pop(); render(); }
+function NP(){ return G.players.length; }
+function nextActive(from){ const n = NP(); for (let k = 1; k <= n; k++){ const j = (from + k) % n; if (!G.players[j].out) return j; } return from; }
+function seated(p){ return !p.out && (p.ai || p.connected); }
+function orderFrom(start){ const n = NP(), r = []; for (let k = 0; k < n; k++){ const p = G.players[(start + k) % n]; if (seated(p)) r.push(p); } return r; }
+function inHand(order){ return order.filter(p => !p.hand.folded); }
+
+async function hostRun(gid){
+  const ok = () => G && G.id === gid;
+  say(`荷官：歡迎入座。每人 ${S.chips} 枚籌碼，共 ${S.hands} 局。`, true);
+  for (let h = 1; h <= S.hands; h++){
+    if (!ok()) return;
+    if (G.players.filter(p => !p.out).length < 2) break;
+    if (G.players.filter(seated).length < 2){ say('在座玩家不足兩人，牌局提前結束。', true); break; }
+    G.hand = h;
+    await playHand(gid);
+  }
+  if (!ok()) return;
+  endGame();
+}
+async function playHand(gid){
+  const alive = () => G && G.id === gid;
+  const betMs = S.timer ? S.betSec * 1000 : 0, declMs = S.timer ? S.declSec * 1000 : 0;
+  G.deck = buildDeck(); G.pot = 0; G.level = 0; G.result = null; G.inHand = true;
+  G.button = nextActive(G.button);
+  const order = orderFrom(nextActive(G.button));
+  G.players.forEach(p => p.hand = null);
+  order.forEach(p => p.hand = {nums:[], ops:['+','-','/'], sqrt:false, special:null, contrib:0, folded:false, acted:false, decl:null, revealed:false, act:'', tags:[]});
+  G.cap = Math.min(...order.map(p => p.chips));
+  G.phase = '發暗牌';
+  say(`第 ${G.hand} 局開始。本局每人投入上限 ${G.cap} 枚（場上最少籌碼）。`, true);
+  const away = G.players.filter(p => !p.out && !seated(p));
+  if (away.length) say(`${away.map(p => p.name).join('、')} 離線中，這局暫停參加。`);
+  order.forEach(p => { p.chips -= ANTE; p.hand.contrib += ANTE; G.pot += ANTE; });
+  G.level = ANTE;
+  say(`每人先下底注 ${ANTE} 枚。`);
+  await sleep(500); if (!alive()) return;
+
+  for (const p of order){
+    while (true){
+      const c = G.deck.pop();
+      if (c.t === 'n'){ p.hand.nums.push({...c, hidden:true}); break; }
+      G.deck.splice(Math.floor(Math.random() * G.deck.length), 0, c);
+      say(`${p.name} 的暗牌抽到 ${c.t === 'sqrt' ? '√' : '×'}，退回重抽。`);
+    }
+    render(); await sleep(180); if (!alive()) return;
+  }
+  G.phase = '發公開牌';
+  for (let k = 0; k < 2; k++) for (const p of order){ await dealOpen(p, gid, betMs); if (!alive()) return; }
+
+  await bettingRound(order, '第一輪下注', gid, betMs); if (!alive()) return;
+
+  if (inHand(order).length > 1){
+    G.phase = '發最後一張公開牌';
+    for (const p of inHand(order)){ await dealOpen(p, gid, betMs); if (!alive()) return; }
+    await bettingRound(order, '最後下注', gid, betMs); if (!alive()) return;
+  }
+
+  const live = inHand(order);
+  if (live.length > 1){
+    G.phase = '宣告與開牌';
+    for (const p of live){
+      if (p.hand.folded) continue;
+      G.turn = p.i; render();
+      let d = null;
+      if (p.ai){ await sleep(900); d = aiDeclare(p); }
+      else {
+        const raw = await ask(p, 'declare', {}, declMs, (reason, req) => reason === 'timeout' && req.draft ? req.draft : null);
+        d = raw ? buildDecl(p.hand, raw) : null;
+      }
+      if (!alive()) return;
+      if (p.hand.folded) continue;
+      if (!d){
+        p.hand.folded = true; p.hand.act = '未完成算式';
+        say(`${p.name} 沒有完成算式，視為棄牌。`); render(); continue;
+      }
+      p.hand.decl = d; p.hand.revealed = true;
+      const label = {high:'大（20）', low:'小（1）', swing:'Swing（大小都賭）'}[d.type];
+      const parts = [];
+      if (d.high) parts.push(`${exprText(p.hand, d.high.expr)} = ${fmt(d.high.val)}`);
+      if (d.low) parts.push(`${exprText(p.hand, d.low.expr)} = ${fmt(d.low.val)}`);
+      say(`${p.name} 宣告 ${label}：${parts.join('；')}`);
+      await sleep(450);
+    }
+    G.turn = -1;
+  }
+  const fin = live.length > 1 ? live.filter(p => !p.hand.folded && p.hand.decl) : inHand(order);
+  if (fin.length === 1){
+    const w = fin[0];
+    w.chips += G.pot; w.hand.tags.push(['good', `贏得 ${G.pot}`]);
+    say(`${live.length > 1 ? '只剩一位完成宣告' : '其他人都棄牌'}，${w.name} 拿走底池 ${G.pot} 枚。`, true);
+    G.result = {winners:[w]}; G.pot = 0;
+  } else if (fin.length === 0){
+    G.house += G.pot; say(`沒有人完成宣告，底池 ${G.pot} 枚由荷官沒收。`, true);
+    G.result = {winners:[]}; G.pot = 0;
+  } else showdown(fin);
+  G.inHand = false;
+  order.forEach(p => { p.hand.revealed = true; });
+  for (const p of order) if (p.chips <= 0 && !p.out){ p.out = true; say(`${p.name} 籌碼歸零，淘汰。`, true); }
+  G.phase = '本局結束';
+  render();
+  await ask(G.players[mySeat], 'next', {last:G.hand >= S.hands}, S.timer ? 20000 : 0, () => true);
+}
+async function dealOpen(p, gid, betMs){
+  const h = p.hand;
+  while (true){
+    const c = G.deck.pop();
+    if (c.t === 'n'){ h.nums.push({...c, hidden:false}); render(); await sleep(220); return; }
+    const sym = c.t === 'sqrt' ? '√' : '×';
+    if (h.special){ say(`${p.name} 抽到第二張符號牌 ${sym}，丟棄並補牌。`); await sleep(250); continue; }
+    h.special = c.t;
+    if (c.t === 'sqrt'){
+      h.sqrt = true;
+      say(`${p.name} 抽到 √，再補一張牌。`);
+    } else {
+      h.ops.push('*'); render();
+      const opts = [...new Set(h.ops.filter(o => o === '+' || o === '-' || o === '*'))];
+      let give = p.ai ? aiSurrender(p) : await ask(p, 'surrender', {opts}, betMs, () => aiSurrender(p));
+      if (!G || G.id !== gid) return;
+      if (!opts.includes(give)) give = aiSurrender(p);
+      h.ops.splice(h.ops.indexOf(give), 1);
+      say(`${p.name} 抽到 ×，交出 ${OPD[give]}，再補一張數字牌。`);
+    }
+    await sleep(300);
+  }
+}
+function sanitizeBet(v, toCall){
+  if (!v || typeof v !== 'object') return toCall ? {a:'fold'} : {a:'check'};
+  if (v.a === 'fold') return {a:'fold', timeout:!!v.timeout};
+  if (v.a === 'raise' && G.level < G.cap){
+    const to = parseInt(v.to, 10);
+    return {a:'raise', to:Number.isFinite(to) ? to : G.level + 1};
+  }
+  if (v.a === 'check' && !v.timeout && toCall) return {a:'call'};
+  if (v.a === 'check' || (v.a === 'call' && !toCall)) return {a:'check', timeout:!!v.timeout};
+  return toCall ? {a:'call'} : {a:'check'};
+}
+async function bettingRound(order, label, gid, betMs){
+  G.phase = label;
+  order.forEach(p => { p.hand.acted = false; p.hand.act = p.hand.folded ? p.hand.act : ''; });
+  if (G.level >= G.cap){ say(`${label}：已達投入上限，直接進入下一步。`); return; }
+  say(`${label}開始。`, true);
+  let i = 0;
+  while (true){
+    if (inHand(order).length <= 1) break;
+    const pend = order.filter(p => !p.hand.folded && (!p.hand.acted || p.hand.contrib < G.level));
+    if (!pend.length) break;
+    const p = order[i % order.length]; i++;
+    if (p.hand.folded || (p.hand.acted && p.hand.contrib === G.level)) continue;
+    const toCall = G.level - p.hand.contrib;
+    G.turn = p.i; render();
+    let act;
+    if (p.ai){ await sleep(650); act = aiBet(p, toCall); }
+    else {
+      const v = await ask(p, 'bet', {toCall, raiseTo:Math.min(G.cap, G.level + 1)}, betMs,
+        reason => (reason === 'disconnect' || toCall > 0) ? {a:'fold', timeout:reason === 'timeout'} : {a:'check', timeout:true});
+      act = sanitizeBet(v, toCall);
+    }
+    if (!G || G.id !== gid) return;
+    const h = p.hand;
+    if (h.folded) continue;
+    if (act.a === 'fold'){ h.folded = true; h.act = act.timeout ? '逾時棄牌' : '棄牌'; say(`${p.name} ${act.timeout ? '逾時，自動棄牌' : '棄牌'}。`); }
+    else if (act.a === 'check'){ h.act = act.timeout ? '逾時過牌' : '過牌'; say(`${p.name} ${act.timeout ? '逾時，自動過牌' : '過牌'}。`); }
+    else if (act.a === 'call'){ p.chips -= toCall; h.contrib += toCall; G.pot += toCall; h.act = `跟注 ${toCall}`; say(`${p.name} 跟注 ${toCall}。`); }
+    else if (act.a === 'raise'){
+      const to = Math.max(G.level + 1, Math.min(G.cap, act.to)), pay = to - h.contrib;
+      p.chips -= pay; h.contrib += pay; G.pot += pay; G.level = to;
+      h.act = `加注到 ${to}`; say(`${p.name} 加注，每人投入提高到 ${to} 枚。`);
+    }
+    h.acted = true;
+    render();
+  }
+  G.turn = -1; render();
+}
+function showdown(live){
+  let alive = live.slice();
+  let hi, lo;
+  while (true){
+    hi = sideBest('high', alive.filter(p => p.hand.decl.type !== 'low').map(p => ({p, entry:{val:p.hand.decl.high.val, cards:p.hand.nums}})));
+    lo = sideBest('low', alive.filter(p => p.hand.decl.type !== 'high').map(p => ({p, entry:{val:p.hand.decl.low.val, cards:p.hand.nums}})));
+    const bad = alive.filter(p => p.hand.decl.type === 'swing' && (!hi || hi.p !== p || !lo || lo.p !== p));
+    if (!bad.length) break;
+    bad.forEach(p => { p.hand.tags.push(['bad', 'Swing 失敗']); say(`${p.name} 的 Swing 沒有同時贏下大小兩邊，失去資格。`); });
+    alive = alive.filter(p => !bad.includes(p));
+  }
+  const winners = [];
+  if (hi){ winners.push(hi.p); hi.p.hand.tags.push(['hi', '大方贏家']); say(`大方贏家：${hi.p.name}（${fmt(hi.p.hand.decl.high.val)}）`, true); }
+  if (lo){ if (!winners.includes(lo.p)) winners.push(lo.p); lo.p.hand.tags.push(['lo', '小方贏家']); say(`小方贏家：${lo.p.name}（${fmt(lo.p.hand.decl.low.val)}）`, true); }
+  if (!winners.length){
+    G.house += G.pot; say(`沒有贏家，底池 ${G.pot} 枚由荷官沒收。`, true);
+  } else {
+    const share = Math.floor(G.pot / winners.length), rem = G.pot - share * winners.length;
+    winners.forEach(w => { w.chips += share; w.hand.tags.push(['good', `+${share}`]); });
+    say(`底池 ${G.pot} 枚由 ${winners.map(w => w.name).join('、')} 平分，每人 ${share} 枚${rem ? `，餘下 ${rem} 枚由荷官沒收` : ''}。`, true);
+    G.house += rem;
+  }
+  G.pot = 0;
+  G.result = {winners};
+}
+function endGame(){
+  G.over = true; G.phase = '遊戲結束';
+  const ranked = G.players.slice().sort((a, b) => b.chips - a.chips);
+  say(`遊戲結束。第一名：${ranked[0].name}（${ranked[0].chips} 枚）。`, true);
+}
+
+/* ---------- host: views sent to each seat ---------- */
+function viewFor(seat){
+  return {
+    hand:G.hand, hands:S.hands, phase:G.phase, pot:G.pot, level:G.level, cap:G.cap, house:G.house,
+    button:G.button, turn:G.turn, over:G.over, code:roomCode,
+    winners:G.result ? G.result.winners.map(p => p.i) : [],
+    turnDeadline:G.turnDeadline ? Math.max(0, G.turnDeadline - Date.now()) : 0,
+    log:G.log.slice(0, 80),
+    players:G.players.map(p => ({
+      i:p.i, name:p.name, ai:p.ai, chips:p.chips, out:p.out, connected:p.ai || p.connected, host:!!p.isHost,
+      hand:p.hand ? {
+        nums:p.hand.nums.map(n => (n.hidden && p.i !== seat && !p.hand.revealed) ? {back:true} : n),
+        ops:p.hand.ops, sqrt:p.hand.sqrt, contrib:p.hand.contrib, folded:p.hand.folded, act:p.hand.act, tags:p.hand.tags,
+        decl:p.hand.decl ? {
+          type:p.hand.decl.type,
+          high:p.hand.decl.high ? {text:exprText(p.hand, p.hand.decl.high.expr), val:p.hand.decl.high.val} : null,
+          low:p.hand.decl.low ? {text:exprText(p.hand, p.hand.decl.low.expr), val:p.hand.decl.low.val} : null,
+        } : null,
+      } : null,
+    })),
+  };
+}
+let renderQueued = false;
+function render(){
+  if (role !== 'host' || renderQueued) return;
+  renderQueued = true;
+  queueMicrotask(() => {
+    renderQueued = false;
+    if (!G) return;
+    for (const p of G.players) if (p.conn && p.connected) safeSend(p.conn, {type:'state', seat:p.i, view:viewFor(p.i)});
+    V = viewFor(mySeat);
+    V.localDeadline = V.turnDeadline ? Date.now() + V.turnDeadline : 0;
+    drawGame();
+  });
+}
+
+/* ---------- client ---------- */
+async function doJoin(codeIn, nameIn){
+  const code = String(codeIn || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 4) return setMsg('房號是 4 個字元，請再確認一次。');
+  const name = cleanName(nameIn);
+  if (!name) return setMsg('請先輸入暱稱。');
+  if (typeof Peer === 'undefined') return setMsg('連線元件載入失敗，請檢查網路後重新整理。');
+  myName = name; lsSet('eqhilo.name', name); roomCode = code;
+  setMsg('連線中…');
+  try { if (!peer || peer.destroyed){ peer = await openPeer(null); role = 'client'; setupPeer(); } }
+  catch (e) { return setMsg(errText(e)); }
+  role = 'client';
+  const c = peer.connect(PREFIX + code, {reliable:true});
+  hostConn = c;
+  const to = setTimeout(() => { if (!c.open && hostConn === c){ setMsg('連不上房間：可能房號錯誤、房主已關閉，或網路擋住了連線。'); try { c.close(); } catch (e) {} } }, 15000);
+  c.on('open', () => { clearTimeout(to); hostSeen = Date.now(); safeSend(c, {type:'hello', cid:myCid, name}); });
+  c.on('data', clientOnMsg);
+  c.on('close', () => { if (hostConn === c && !leaving) onHostLost(); });
+  c.on('error', () => {});
+}
+function onHostLost(){
+  hostConn = null; A = null;
+  openModal(`<h2>連線中斷</h2><p>和房主的連線中斷了。如果房主還開著房間，按「重新連線」可以回到原本的座位。</p>
+    <div class="row"><button class="btn primary" data-act="rejoin">重新連線</button><a class="btn" href="index.html">回大廳</a></div>`);
+}
+let hostSeen = 0;
+function clientOnMsg(m){
+  if (!m || typeof m !== 'object') return;
+  hostSeen = Date.now();
+  if (m.type === 'ping') return;
+  if (m.type === 'reject'){
+    leaving = true; setMsg(m.reason || '無法加入這個房間。');
+    setTimeout(() => { leaving = false; }, 1500);
+    return;
+  }
+  if (m.type === 'lobby'){
+    lobbyView = m; S = m.settings; roomCode = m.code || roomCode;
+    V = null; A = null; rankShown = false;
+    if ($('#modal').innerHTML) closeModal();
+    screen = 'wait'; drawPre();
+    return;
+  }
+  if (m.type === 'state'){
+    mySeat = m.seat; V = m.view;
+    V.localDeadline = V.turnDeadline ? Date.now() + V.turnDeadline : 0;
+    if (screen !== 'game'){ screen = 'game'; closeModal(); }
+    drawGame();
+    return;
+  }
+  if (m.type === 'prompt'){ A = makeAwait(m); drawGame(); return; }
+  if (m.type === 'unprompt'){ if (A && A.id === m.id){ A = null; drawGame(); } }
+}
+
+/* ---------- my actions (host or client) ---------- */
+function submit(value){
+  const a = A; if (!a) return;
+  A = null;
+  if (role === 'host'){ const r = pending.get(mySeat); if (r && r.id === a.id) r.resolve(value); }
+  else safeSend(hostConn, {type:'act', id:a.id, value});
+  drawGame();
+}
+function sendDraft(){
+  const a = A; if (!a || a.kind !== 'declare') return;
+  const draft = {type:a.b.type, eqs:{high:a.b.eq.high, low:a.b.eq.low}};
+  if (role === 'host'){ const r = pending.get(mySeat); if (r && r.id === a.id) r.draft = draft; }
+  else safeSend(hostConn, {type:'draft', id:a.id, draft});
+}
+
+/* ---------- drawing the table ---------- */
+function cardHTML(n, opts = {}){
+  const size = opts.size ? ' ' + opts.size : '';
+  if (n.back) return `<div class="card back${size}" aria-label="暗牌"></div>`;
+  return `<div class="card t${n.c}${size}" aria-label="${TIER[n.c]} ${n.v}">${opts.sqrt ? '<span class="sqrt-mark">√</span>' : ''}${n.hidden ? '<span class="hid">暗</span>' : ''}${n.v}<span class="tier">${TIER[n.c]}</span></div>`;
+}
+function seatHTML(p, isMe, area){
+  const h = p.hand;
+  const cls = ['seat'];
+  if (isMe) cls.push('mine');
+  if (V.turn === p.i) cls.push('turn');
+  if (h && h.folded) cls.push('folded');
+  if (p.out) cls.push('out');
+  if (V.winners.includes(p.i)) cls.push('win');
+  const sub = [];
+  let cards = '', ops = '', eq = '';
+  if (!p.connected) sub.push('<span class="pill off">離線</span>');
+  if (V.turn === p.i && V.localDeadline) sub.push(`<span class="pill timer" data-dl="${V.localDeadline}"></span>`);
+  if (h){
+    cards = h.nums.map(n => cardHTML(n, {size:isMe ? 'big' : ''})).join('');
+    ops = h.ops.map(o => `<span class="op${o === '*' ? ' special' : ''}">${OPD[o]}</span>`).join('') + (h.sqrt ? '<span class="op special">√</span>' : '');
+    sub.push(`本局投入 ${h.contrib}`);
+    if (h.act) sub.push(`<span class="pill${h.folded ? ' bad' : ''}">${esc(h.act)}</span>`);
+    if (h.decl){
+      const m = {high:['hi','大'], low:['lo','小'], swing:['sw','Swing']}[h.decl.type];
+      sub.push(`<span class="pill ${m[0]}">宣告 ${m[1]}</span>`);
+      if (h.decl.high) eq += `<div class="eqline">${esc(h.decl.high.text)} = <em>${fmt(h.decl.high.val)}</em></div>`;
+      if (h.decl.low) eq += `<div class="eqline">${esc(h.decl.low.text)} = <em>${fmt(h.decl.low.val)}</em></div>`;
+    }
+    (h.tags || []).forEach(([k, t]) => sub.push(`<span class="pill ${esc(k)}">${esc(t)}</span>`));
+  } else if (p.out) sub.push('<span class="pill bad">已淘汰</span>');
+  else if (V.hand && !p.connected) sub.push('本局暫停');
+  else sub.push('等待發牌');
+  return `<section class="${cls.join(' ')}" style="grid-area:${area}" aria-label="${esc(p.name)}">
+    <div class="seat-head"><span class="seat-name">${esc(p.name)}${isMe ? '（你）' : ''}${V.button === p.i ? ' <span class="pill">莊位</span>' : ''}${p.host ? ' <span class="pill hi">房主</span>' : ''}</span><span class="seat-chips">${p.chips} 枚</span></div>
+    <div class="seat-sub">${sub.join('')}</div>
+    <div class="cards">${cards}</div>
+    <div class="ops">${ops}</div>${eq}
+  </section>`;
+}
+function centerHTML(){
+  return `<div class="center">
+    <div class="dealer">荷 官</div>
+    <div class="phase">${V.hand ? `第 ${V.hand} / ${V.hands} 局 · ` : ''}${esc(V.phase)}</div>
+    <div class="pot-label">底池</div>
+    <div class="pot">${V.pot}</div>
+    <div class="stats">
+      <span>每人投入</span><b>${V.level}</b>
+      <span>投入上限</span><b>${V.cap || '—'}</b>
+      <span>荷官沒收</span><b>${V.house}</b>
+    </div>
+  </div>`;
+}
+function cdHTML(){ return A && A.deadline ? ` <span class="cd" data-dl="${A.deadline}"></span>` : ''; }
+function actionHTML(){
+  const me = V.players[mySeat];
+  if (V.over){
+    return `<div class="panel"><h3>遊戲結束</h3><div class="row"><button class="btn" data-act="showrank">查看排名</button>${role === 'host' ? '<button class="btn primary" data-act="to-lobby">回到等候室再開一場</button>' : ''}</div>${role === 'host' ? '' : '<p class="hint">等待房主決定是否再開一場。</p>'}</div>`;
+  }
+  const a = A;
+  if (!a){
+    let t = '輪到其他玩家行動中…';
+    if (V.phase === '本局結束') t = '等待房主開始下一局…';
+    else if (me.out) t = '你已被淘汰，可以繼續觀看牌局。';
+    else if (me.hand && me.hand.folded) t = '你已棄牌，等待本局結束。';
+    else if (!me.hand && V.hand) t = '你這局沒有參加，等待下一局。';
+    else if (!V.hand) t = '荷官準備發牌中…';
+    return `<div class="panel"><h3>你的回合</h3><p class="hint">${t}</p></div>`;
+  }
+  if (a.kind === 'next'){
+    return `<div class="panel"><h3>本局結算${cdHTML()}</h3><p class="hint">看完各家的算式後，由你（房主）開始下一局${a.ms ? '；時間到會自動開始' : ''}。</p><div class="row"><button class="btn primary" data-act="next">${a.last ? '看最終結果' : '下一局'}</button></div></div>`;
+  }
+  if (a.kind === 'surrender'){
+    return `<div class="panel"><h3>你抽到 ×${cdHTML()}</h3><p class="hint">依規則要交出一張 +、− 或 × 符號牌，之後再補一張數字牌。</p><div class="row">${a.opts.map(o => `<button class="btn" data-act="surrender" data-v="${esc(o)}">交出 ${OPD[o] || esc(o)}</button>`).join('')}</div></div>`;
+  }
+  if (a.kind === 'bet'){
+    if (a.raiseTo === undefined || a.raiseTo <= V.level) a.raiseTo = Math.min(V.cap, V.level + 1);
+    const canRaise = V.level < V.cap;
+    return `<div class="panel"><h3>${esc(V.phase)}${cdHTML()}</h3>
+      <p class="hint">目前每人投入 ${V.level} 枚，你已投入 ${me.hand.contrib} 枚${a.toCall ? `，需跟注 ${a.toCall} 枚` : ''}。本局上限 ${V.cap} 枚。${a.ms ? (a.toCall ? '時間到會自動棄牌。' : '時間到會自動過牌。') : ''}</p>
+      <div class="row">
+        <button class="btn danger" data-act="fold">棄牌</button>
+        <button class="btn" data-act="call">${a.toCall ? `跟注 ${a.toCall}` : '過牌'}</button>
+        ${canRaise ? `<span class="stepper"><button data-act="rdec" aria-label="減少">−</button><output>${a.raiseTo}</output><button data-act="rinc" aria-label="增加">+</button></span>
+        <button class="btn primary" data-act="raise">加注到 ${a.raiseTo}</button>` : '<span class="hint">已達上限，不能再加注</span>'}
+      </div></div>`;
+  }
+  if (a.kind === 'declare') return builderHTML();
+  return '';
+}
+function builderHTML(){
+  const b = A.b, h = V.players[mySeat].hand;
+  const needs = b.type === 'swing' ? ['high','low'] : [b.type];
+  if (!needs.includes(b.tab)) b.tab = needs[0];
+  const eq = b.eq[b.tab];
+  const usedN = new Set(eq.slots.filter((s, i) => i % 2 === 0 && s !== null));
+  const usedO = new Set(eq.slots.filter((s, i) => i % 2 === 1 && s !== null));
+  const slots = eq.slots.map((s, i) => {
+    if (i % 2 === 0){
+      const k = i / 2;
+      const inner = s === null ? '' : cardHTML(h.nums[s], {sqrt:eq.sqrtAt === k});
+      const tog = h.sqrt ? `<button class="sqrt-tog${eq.sqrtAt === k ? ' on' : ''}" data-act="sqrt" data-k="${k}">√</button>` : '';
+      return `<div class="numwrap"><button class="slot${s !== null ? ' filled' : ''}" data-act="slot" data-i="${i}" aria-label="數字位置 ${k + 1}">${inner}</button>${tog}</div>`;
+    }
+    return `<button class="slot op-slot${s !== null ? ' filled' : ''}" data-act="slot" data-i="${i}" aria-label="符號位置">${s === null ? '' : `<span class="op">${OPD[h.ops[s]]}</span>`}</button>`;
+  }).join('');
+  const pool = h.nums.map((n, i) => usedN.has(i) ? '' : `<button data-act="pn" data-i="${i}">${cardHTML(n)}</button>`).join('')
+    + h.ops.map((o, i) => usedO.has(i) ? '' : `<button data-act="po" data-i="${i}"><span class="op" style="width:34px;height:34px">${OPD[o]}</span></button>`).join('');
+  const res = needs.map(t => {
+    const r = eqValue(b.eq[t], h), target = t === 'high' ? 20 : 1;
+    return `<div>${t === 'high' ? '大方算式' : '小方算式'}：${r.ok ? `<span class="ok">= ${fmt(r.val)}</span>（離 ${target} 差 ${fmt(Math.abs(r.val - target))}）` : `<span class="bad">${r.why}</span>`}</div>`;
+  }).join('');
+  const ready = needs.every(t => eqValue(b.eq[t], h).ok);
+  return `<div class="panel"><h3>輪到你宣告並排出算式${cdHTML()}</h3>
+    <div class="row">
+      <button class="btn${b.type === 'high' ? ' sel' : ''}" data-act="dtype" data-v="high">賭大（20）</button>
+      <button class="btn${b.type === 'low' ? ' sel' : ''}" data-act="dtype" data-v="low">賭小（1）</button>
+      <button class="btn${b.type === 'swing' ? ' sel' : ''}" data-act="dtype" data-v="swing">Swing（大小都賭）</button>
+    </div>
+    ${b.type === 'swing' ? `<div class="row"><button class="btn${b.tab === 'high' ? ' sel' : ''}" data-act="dtab" data-v="high">編輯大方算式</button><button class="btn${b.tab === 'low' ? ' sel' : ''}" data-act="dtab" data-v="low">編輯小方算式</button></div>` : ''}
+    <p class="hint">點下方的牌放進算式，點已放好的位置可以取回。所有牌都要用到，沒有括號，先乘除後加減。${h.sqrt ? '√ 要指定給其中一個數字。' : ''}${A.ms ? '時間到時，如果算式已排完就用它宣告，沒排完視為棄牌。' : ''}</p>
+    <div class="slots">${slots}</div>
+    <div class="pool">${pool}</div>
+    <div class="result">${res}</div>
+    <div class="row"><button class="btn" data-act="dclear">清空這條算式</button><button class="btn primary" data-act="declare" ${ready ? '' : 'disabled'}>宣告並開牌</button></div>
+  </div>`;
+}
+function drawGame(){
+  if (!V) return;
+  $('#pre').hidden = true; $('#table').hidden = false; $('#logbox').hidden = false;
+  $('#roomTag').textContent = roomCode ? `房號 ${roomCode}` : '';
+  const N = V.players.length;
+  let html = '';
+  for (let k = 1; k < N; k++) html += seatHTML(V.players[(mySeat + k) % N], false, 's' + k);
+  html += centerHTML() + `<div class="me">${seatHTML(V.players[mySeat], true, 'auto')}${actionHTML()}</div>`;
+  $('#table').innerHTML = html;
+  $('#log').innerHTML = V.log.map(l => `<li class="${l.strong ? 'h' : ''}">${esc(l.msg)}</li>`).join('');
+  tick();
+  if (A && A !== lastShown){
+    lastShown = A;
+    const el = document.querySelector('.me .panel');
+    if (el){
+      const r = el.getBoundingClientRect();
+      if (r.top < 0 || r.bottom > innerHeight){
+        const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        el.scrollIntoView({behavior:reduce ? 'auto' : 'smooth', block:r.height > innerHeight ? 'start' : 'end'});
+      }
+    }
+  }
+  if (V.over && !rankShown){ rankShown = true; showRank(); }
+}
+function tick(){
+  document.querySelectorAll('[data-dl]').forEach(el => {
+    const dl = +el.dataset.dl;
+    if (!dl){ el.textContent = ''; return; }
+    const s = Math.max(0, Math.ceil((dl - Date.now()) / 1000));
+    el.textContent = `剩 ${s} 秒`;
+    el.classList.toggle('urgent', s <= 5);
+  });
+}
+setInterval(tick, 300);
+
+/* ---------- heartbeat: notice players (or the host) who vanished without a clean close ---------- */
+const CLIENT_SILENT_MS = 20000, HOST_SILENT_MS = 45000;
+setInterval(() => {
+  if (role === 'host'){
+    const conns = G ? G.players.filter(p => p.conn).map(p => p.conn) : lobby.filter(x => x.conn).map(x => x.conn);
+    conns.forEach(c => {
+      safeSend(c, {type:'ping'});
+      if (Date.now() - (c._seen || 0) > CLIENT_SILENT_MS){ try { c.close(); } catch (e) {} hostOnClose(c); }
+    });
+  } else if (role === 'client' && hostConn && hostConn.open){
+    safeSend(hostConn, {type:'ping'});
+    if (hostSeen && Date.now() - hostSeen > HOST_SILENT_MS){ const c = hostConn; hostConn = null; try { c.close(); } catch (e) {} if (!leaving) onHostLost(); }
+  }
+}, 4000);
+function showRank(){
+  const ranked = V.players.slice().sort((a, b) => b.chips - a.chips);
+  const me = ranked.findIndex(p => p.i === mySeat) + 1;
+  openModal(`<h2>最終排名</h2>
+    <p class="hint">以籌碼數決定勝負，你排第 ${me} 名。荷官共沒收 ${V.house} 枚。</p>
+    <table class="rank">${ranked.map((p, k) => `<tr><td>${k + 1}. ${esc(p.name)}${p.i === mySeat ? '（你）' : ''}${p.ai ? '（電腦）' : ''}${p.out ? '（淘汰）' : ''}</td><td>${p.chips}</td></tr>`).join('')}</table>
+    <div class="row">${role === 'host' ? '<button class="btn primary" data-act="to-lobby">回到等候室再開一場</button>' : ''}<button class="btn" data-act="close">看牌桌</button></div>`);
+}
+function openModal(html){ $('#modal').innerHTML = `<div class="modal" data-act="backdrop"><div class="modal-box" role="dialog" aria-modal="true">${html}</div></div>`; }
+function closeModal(){ $('#modal').innerHTML = ''; }
+function rulesHTML(){
+  const st = S || {chips:30, hands:9, timer:true, betSec:30, declSec:90};
+  return `<h2>遊戲規則</h2>
+  <h4>牌組（52 張）</h4>
+  <ul><li>數字牌 0–10，每個數字有金、銀、銅、黑四色，共 44 張。顏色由高到低：金 > 銀 > 銅 > 黑。</li><li>√ 牌 4 張、× 牌 4 張。</li><li>每位玩家一開始就有 +、−、÷ 三張符號牌。</li></ul>
+  <h4>一局的流程</h4>
+  <ol>
+    <li>每人下底注 1 枚。</li>
+    <li>每人發 1 張暗牌，抽到 √ 或 × 就退回重抽，直到拿到數字牌。</li>
+    <li>每人再發 2 張公開牌：抽到 √ 可以再補一張牌；抽到 × 要交出一張 +、− 或 ×，再補一張數字牌；第二張符號牌一律丟棄，直到拿到數字牌。</li>
+    <li>第一輪下注（類似德州撲克，但沒有大小盲）。</li>
+    <li>再發 1 張公開牌，特殊牌規則同上，這就是最終手牌。</li>
+    <li>最後下注。</li>
+    <li>依順序輪流宣告「大」「小」或「Swing」，宣告的同時排出算式開牌。</li>
+  </ol>
+  <h4>算式</h4>
+  <ul><li>4 張數字牌與 3 張符號牌全部都要用到；有 √ 時也要用，且只能用在一個數字上。</li><li>沒有括號，先乘除、後加減。不能除以 0。</li></ul>
+  <h4>下注</h4>
+  <ul><li>可以過牌、跟注、加注或棄牌。</li><li>每人本局的總投入，不能超過場上籌碼最少的玩家（開局時的籌碼）。</li></ul>
+  <h4>勝負</h4>
+  <ul><li>賭大：最接近 20 的人贏；賭小：最接近 1 的人贏。</li><li>距離相同時，賭大比手上最大的數字牌，賭小比最小的數字牌；數字也相同就比顏色（賭大比高、賭小比低）。</li><li>Swing 要排出兩條算式，大小兩邊都贏才算贏，否則失去資格。</li><li>底池由所有贏家平分，除不盡的籌碼由荷官沒收。</li><li>籌碼歸零即淘汰；${st.hands} 局後以籌碼數決定名次（起始 ${st.chips} 枚）。</li></ul>
+  <h4>多人連線</h4>
+  <ul>
+    <li>${st.timer ? `下注 ${st.betSec} 秒、排算式 ${st.declSec} 秒。下注逾時：不用跟注就自動過牌，要跟注就自動棄牌；排算式逾時：已排完就用目前的算式宣告，沒排完視為棄牌。` : '這個房間不計時。'}</li>
+    <li>牌局中斷線的玩家當局自動棄牌，籌碼保留；用同一個瀏覽器重新進房就能回到座位。</li>
+    <li>房主的網頁是荷官，房主離開時整桌結束。</li>
+  </ul>
+  <div class="row"><button class="btn primary" data-act="close">知道了</button></div>`;
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act;
+  if (act === 'backdrop'){ if (e.target === el) closeModal(); return; }
+  switch (act){
+    case 'rules': openModal(rulesHTML()); return;
+    case 'close': closeModal(); return;
+    case 'create': doCreate(); return;
+    case 'join': doJoin($('#join-code').value, $('#nm-join').value); return;
+    case 'rejoin': closeModal(); doJoin(roomCode, myName); return;
+    case 'start-game': if (role === 'host' && !G) hostStart(); return;
+    case 'to-lobby': if (role === 'host' && G && G.over) hostToLobby(); return;
+    case 'showrank': showRank(); return;
+    case 'copy': {
+      const link = inviteLink(), msg = $('#copyMsg');
+      const fallback = () => { const i = $('#invite'); i.focus(); i.select(); if (msg) msg.textContent = '已選取連結，請按複製。'; };
+      try { navigator.clipboard.writeText(link).then(() => { if (msg) msg.textContent = '已複製邀請連結。'; }, fallback); } catch (x) { fallback(); }
+      return;
+    }
+  }
+  const a = A;
+  if (!a || !V) return;
+  if (a.kind === 'next' && act === 'next') submit(true);
+  if (a.kind === 'surrender' && act === 'surrender') submit(el.dataset.v);
+  if (a.kind === 'bet'){
+    if (act === 'fold') submit({a:'fold'});
+    if (act === 'call') submit(a.toCall ? {a:'call'} : {a:'check'});
+    if (act === 'raise') submit({a:'raise', to:a.raiseTo});
+    if (act === 'rinc'){ a.raiseTo = Math.min(V.cap, a.raiseTo + 1); drawGame(); }
+    if (act === 'rdec'){ a.raiseTo = Math.max(V.level + 1, a.raiseTo - 1); drawGame(); }
+  }
+  if (a.kind === 'declare'){
+    const b = a.b, h = V.players[mySeat].hand, eq = b.eq[b.tab];
+    if (act === 'dtype'){ b.type = el.dataset.v; if (b.type !== 'swing') b.tab = b.type; }
+    if (act === 'dtab') b.tab = el.dataset.v;
+    if (act === 'pn'){ const k = eq.slots.findIndex((s, i) => i % 2 === 0 && s === null); if (k >= 0) eq.slots[k] = +el.dataset.i; }
+    if (act === 'po'){ const k = eq.slots.findIndex((s, i) => i % 2 === 1 && s === null); if (k >= 0) eq.slots[k] = +el.dataset.i; }
+    if (act === 'slot') eq.slots[+el.dataset.i] = null;
+    if (act === 'sqrt'){ const k = +el.dataset.k; eq.sqrtAt = eq.sqrtAt === k ? -1 : k; }
+    if (act === 'dclear') b.eq[b.tab] = emptyEq();
+    if (act === 'declare'){
+      const needs = b.type === 'swing' ? ['high','low'] : [b.type];
+      if (!needs.every(t => eqValue(b.eq[t], h).ok)) return;
+      submit({type:b.type, eqs:{high:b.eq.high, low:b.eq.low}});
+      return;
+    }
+    sendDraft();
+    drawGame();
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || screen !== 'home') return;
+  if (e.target.id === 'join-code' || e.target.id === 'nm-join') doJoin($('#join-code').value, $('#nm-join').value);
+  if (e.target.id === 'nm-host') doCreate();
+});
+window.addEventListener('beforeunload', e => {
+  if (role === 'host' && (screen === 'wait' || (G && !G.over))){ e.preventDefault(); e.returnValue = ''; }
+});
+window.addEventListener('pagehide', () => { leaving = true; });
+
+drawPre();
+</script>
+</body>
+</html>
