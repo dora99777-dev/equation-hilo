@@ -64,6 +64,22 @@ h1 b{color:var(--brass)}
 .rules h2{margin:0 0 8px;font-size:15px;letter-spacing:.15em;color:var(--brass)}
 .rules ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;color:var(--muted);max-width:62em}
 .rules strong{color:var(--text);font-weight:500}
+.modal{position:fixed;inset:0;background:rgba(3,8,7,.74);display:grid;place-items:center;padding:16px;z-index:20}
+.modal-box{width:min(460px,100%);max-height:90vh;overflow-y:auto;background:var(--panel);border:1px solid var(--brass);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:14px}
+.modal-box h2{margin:0;font-family:var(--f-display);font-weight:900;font-size:24px}
+.modal-box h3{margin:0;font-size:13px;letter-spacing:.12em;color:var(--brass)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.seg button{border:1px solid var(--line);background:#0c1a16;border-radius:10px;padding:10px 6px;font-weight:700;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:center}
+.seg button small{font-weight:400;color:var(--muted);font-size:12px}
+.seg button[aria-pressed="true"]{border-color:var(--brass);background:#2b2614;color:var(--brass)}
+.check{display:flex;gap:8px;align-items:center;font-size:15px}
+.check input{width:19px;height:19px;accent-color:var(--brass)}
+.nums{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.nums label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.nums input{background:#0c1a16;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:16px;color:var(--text);width:100%;min-width:0}
+.nums input:disabled{opacity:.4}
+.modal-actions{display:flex;gap:8px;flex-wrap:wrap}
+.warn{color:var(--brass);font-size:13px;margin:0}
 footer{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 16px}
 @media (prefers-reduced-motion: reduce){.card{transform:none!important}}
 </style>
@@ -86,7 +102,7 @@ footer{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 16p
   <main class="modes">
     <section class="mode">
       <h2>單人遊戲</h2>
-      <p>你和五位電腦玩家同桌，每人 30 枚籌碼打 9 局。電腦分簡單、普通、困難三種難度；每局結束會自動存檔在這個瀏覽器。</p>
+      <p>你和五位電腦玩家同桌，每人 30 枚籌碼打 9 局。電腦分簡單、普通、困難三種難度；可以開行動計時；每局結束會自動存檔在這個瀏覽器。</p>
       <p class="save" id="saveInfo" hidden></p>
       <div class="actions">
         <a class="btn primary" id="continueBtn" href="single.html#continue" hidden>繼續上一場</a>
@@ -130,6 +146,28 @@ footer{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 16p
     <a href="original/">原始版（無存檔）</a>
   </footer>
 </div>
+<div class="modal" id="singleModal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="smTitle">
+    <h2 id="smTitle">單人遊戲設定</h2>
+    <h3>電腦難度</h3>
+    <div class="seg" id="diffSeg">
+      <button type="button" data-diff="easy">簡單<small>常常漏算</small></button>
+      <button type="button" data-diff="normal">普通<small>偶爾漏算</small></button>
+      <button type="button" data-diff="hard">困難<small>每次算到最好</small></button>
+    </div>
+    <h3>行動計時</h3>
+    <label class="check"><input type="checkbox" id="smTimer"> 開啟計時（時間到自動處理）</label>
+    <div class="nums">
+      <label>下注秒數<input type="number" id="smBet" min="10" max="300" value="30" inputmode="numeric"></label>
+      <label>排算式秒數<input type="number" id="smDecl" min="20" max="600" value="90" inputmode="numeric"></label>
+    </div>
+    <p class="warn" id="smWarn" hidden>開始新的一場會覆蓋目前的存檔。</p>
+    <div class="modal-actions">
+      <button class="btn primary" type="button" id="smStart">開始遊戲</button>
+      <button class="btn" type="button" id="smCancel">取消</button>
+    </div>
+  </div>
+</div>
 <script>
 "use strict";
 (function(){
@@ -143,6 +181,37 @@ footer{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 16p
     info.textContent = `存檔：已打完第 ${s.hand} 局，你有 ${s.players[0].chips} 枚籌碼（${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}）`;
     document.getElementById('newBtn').textContent = '開始新的一場（會覆蓋存檔）';
   }
+
+  // Single-player settings dialog
+  const KEY = 'eqhilo.singleSettings';
+  let st = {diff:'normal', timer:false, betSec:30, declSec:90};
+  try { Object.assign(st, JSON.parse(localStorage.getItem(KEY)) || {}); } catch (e) {}
+  const modal = document.getElementById('singleModal');
+  const seg = document.getElementById('diffSeg');
+  const tm = document.getElementById('smTimer'), bet = document.getElementById('smBet'), decl = document.getElementById('smDecl');
+  function paint(){
+    seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.diff === st.diff)));
+    tm.checked = !!st.timer; bet.value = st.betSec; decl.value = st.declSec;
+    bet.disabled = decl.disabled = !st.timer;
+  }
+  document.getElementById('newBtn').addEventListener('click', e => {
+    e.preventDefault();
+    document.getElementById('smWarn').hidden = !(s && s.v === 1);
+    paint(); modal.hidden = false;
+    document.getElementById('smStart').focus();
+  });
+  seg.addEventListener('click', e => { const b = e.target.closest('[data-diff]'); if (b){ st.diff = b.dataset.diff; paint(); } });
+  tm.addEventListener('change', () => { st.timer = tm.checked; paint(); });
+  const close = () => { modal.hidden = true; };
+  document.getElementById('smCancel').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) close(); });
+  document.getElementById('smStart').addEventListener('click', () => {
+    st.betSec = Math.min(300, Math.max(10, parseInt(bet.value, 10) || 30));
+    st.declSec = Math.min(600, Math.max(20, parseInt(decl.value, 10) || 90));
+    try { localStorage.setItem(KEY, JSON.stringify(st)); localStorage.setItem('eqhilo.diff', st.diff); } catch (e) {}
+    location.href = 'single.html#new';
+  });
   document.getElementById('joinForm').addEventListener('submit', e => {
     e.preventDefault();
     const code = document.getElementById('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');

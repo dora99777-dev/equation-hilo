@@ -39,3 +39,12 @@ a.btn{text-decoration:none;display:inline-block;color:var(--text)}
 .card{animation:none}
 .card.fresh{animation:deal .25s ease-out}
 @media (prefers-reduced-motion: reduce){.card.fresh{animation:none}}
+
+/* special-card tile/pill, character tag, stronger winner glow */
+.pill.sym{background:var(--brass);border-color:var(--brass);color:#22170a;font-weight:700;box-shadow:0 0 10px rgba(211,172,85,.55)}
+.pill.tag{border-color:#4f6f64;color:var(--muted);font-weight:500}
+.card.sym-card{background:radial-gradient(circle at 50% 35%,#3a2a0c,#1a1306);border:2px solid var(--brass);color:var(--brass);font-family:var(--f-mono);box-shadow:0 0 0 2px rgba(211,172,85,.25),0 0 14px rgba(211,172,85,.45)}
+.card.sym-card .tier{color:var(--brass);font-size:calc(var(--w)*.2)}
+.seat.win{border-color:var(--brass);box-shadow:0 0 0 3px rgba(211,172,85,.55),0 0 26px rgba(211,172,85,.45);animation:winGlow 1.6s ease-in-out 3}
+@keyframes winGlow{50%{box-shadow:0 0 0 5px rgba(211,172,85,.8),0 0 36px rgba(211,172,85,.7)}}
+@media (prefers-reduced-motion: reduce){.seat.win{animation:none}}

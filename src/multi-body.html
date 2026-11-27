@@ -3,6 +3,7 @@
     <div class="brand"><h1>等式<b>高低</b></h1><small>多人連線</small><span class="room-tag" id="roomTag"></span></div>
     <div class="top-tools">
       <a class="btn" href="index.html">大廳</a>
+      <button class="btn" id="muteBtn" data-act="mute">音效：開</button>
       <button class="btn" data-act="rules">規則</button>
     </div>
   </header>
@@ -13,8 +14,10 @@
 <div id="modal"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="fx.js"></script>
 <script>
 "use strict";
+const fx = window.FX || {sound(){}, play(){}, setMuted(){}, isMuted:() => true, pickPersonas:n => [], personaById:() => null};
 /* =========================================================
    等式高低 · 多人連線
    架構：房主的瀏覽器是「荷官」（唯一的遊戲狀態），
@@ -185,16 +188,19 @@ function strength(hand){
   if (vals.length && Math.min(...vals) <= 1) sl += 0.08;
   return Math.max(sh, sl * 0.85);
 }
+// Personality: agg = raise often, loose = call light (negative folds easily), bluff = raise with weak hands.
 function aiBet(p, toCall){
+  const loose = p.loose || 0, bluff = p.bluff || 0;
   const s = strength(p.hand) + (Math.random() * 0.24 - 0.1) + (p.agg - 0.5) * 0.2;
   const canRaise = G.level < G.cap;
   const raiseTo = () => Math.min(G.cap, G.level + 1 + Math.floor(Math.random() * (1 + p.agg * 3)));
+  const bluffing = canRaise && Math.random() < bluff;
   if (toCall === 0){
-    if (canRaise && s > 0.62 && Math.random() < 0.35 + p.agg * 0.5) return {a:'raise', to:raiseTo()};
+    if (canRaise && (bluffing || (s > 0.62 && Math.random() < 0.35 + p.agg * 0.5))) return {a:'raise', to:raiseTo()};
     return {a:'check'};
   }
-  if (canRaise && s > 0.8 && Math.random() < p.agg * 0.6) return {a:'raise', to:raiseTo()};
-  if (s > 0.3 + toCall * 0.045) return {a:'call'};
+  if (canRaise && (bluffing || (s > 0.8 && Math.random() < p.agg * 0.6))) return {a:'raise', to:raiseTo()};
+  if (s > 0.3 - loose * 0.2 + toCall * 0.045) return {a:'call'};
   return {a:'fold'};
 }
 function aiSurrender(p){
@@ -220,10 +226,10 @@ function aiDeclare(p, rem = 0){
   const winHi = !curHi || beats('high', eh, curHi.entry);
   const winLo = !curLo || beats('low', el, curLo.entry);
   const mk = r => ({val:r.val, expr:r.expr});
-  if (winHi && winLo && b.high.dist < 0.5 && b.low.dist < 0.15 && Math.random() < 0.35 + p.agg * 0.5)
+  if (winHi && winLo && b.high.dist < 0.5 && b.low.dist < 0.15 && Math.random() < 0.35 + (p.swingy ?? p.agg) * 0.5)
     return {type:'swing', high:mk(b.high), low:mk(b.low)};
   const minV = Math.min(...h.nums.map(n => n.v));
-  let sh = Math.exp(-b.high.dist * 0.3) * Math.pow(0.93, hiList.length + rem) + 0.06;
+  let sh = Math.exp(-b.high.dist * 0.3) * Math.pow(0.93, hiList.length + rem) + 0.06 + (p.hiBias || 0) * 0.15;
   let sl = Math.exp(-b.low.dist * 1.1) * Math.pow(0.85, loList.length + rem) * (b.low.dist < EPS ? 0.6 + 0.4 * (1 - minV / 10) : 1);
   if (!winHi) sh *= 0.15;
   if (!winLo) sl *= 0.15;
@@ -321,7 +327,7 @@ function waitHTML(){
   const aiN = st.aiFill ? Math.max(0, 6 - players.length) : 0;
   const total = players.length + aiN;
   const roster = players.map(p => `<li><span>${esc(p.name)}${p.name === myName ? '（你）' : ''}</span>${p.host ? '<span class="pill hi">房主</span>' : '<span class="pill">已入座</span>'}</li>`).join('')
-    + AI_ROSTER.slice(0, aiN).map(a => `<li><span>${a.name}</span><span class="pill">電腦</span></li>`).join('');
+    + Array.from({length:aiN}, () => '<li><span>電腦玩家（開始時從 20 位角色隨機抽出）</span><span class="pill">電腦</span></li>').join('');
   return `<div class="wait-grid">
     <section class="panel">
       <h3>房號</h3>
@@ -431,10 +437,17 @@ function hostOnClose(c){
 function hostStart(){
   const humans = lobby.filter(x => x.host || (x.conn && x.conn.open));
   const players = humans.map((x, i) => ({i, name:x.name, ai:false, agg:.5, chips:S.chips, out:false, hand:null, cid:x.cid, conn:x.conn, connected:true, isHost:x.host}));
-  if (S.aiFill) for (let k = 0; players.length < 6; k++) players.push({i:players.length, name:AI_ROSTER[k].name, ai:true, agg:AI_ROSTER[k].agg, chips:S.chips, out:false, hand:null, connected:true});
+  if (S.aiFill){
+    let roster = fx.pickPersonas(6 - players.length);
+    if (roster.length < 6 - players.length) roster = AI_ROSTER.map(a => ({...a, tag:'', desc:''}));
+    for (let k = 0; players.length < 6; k++){
+      const r = roster[k];
+      players.push({i:players.length, name:r.name, tag:r.tag, desc:r.desc, ai:true, agg:r.agg ?? .5, loose:r.loose || 0, bluff:r.bluff || 0, swingy:r.swingy ?? r.agg ?? .5, hiBias:r.hiBias || 0, chips:S.chips, out:false, hand:null, connected:true});
+    }
+  }
   if (players.length < 2) return setMsg('至少要 2 位玩家才能開始。');
   mySeat = 0;
-  G = {id:++gidSeq, hand:0, button:Math.floor(Math.random() * players.length), pot:0, house:0, level:0, cap:0, turn:-1, phase:'準備開始', log:[], over:false, result:null, players, turnDeadline:0, inHand:false};
+  G = {id:++gidSeq, hand:0, button:Math.floor(Math.random() * players.length), pot:0, house:0, level:0, cap:0, turn:-1, phase:'準備開始', log:[], over:false, result:null, players, turnDeadline:0, inHand:false, fx:[]};
   screen = 'game'; rankShown = false;
   render();
   hostRun(G.id);
@@ -480,6 +493,8 @@ function makeAwait(payload){
 }
 
 /* ---------- host: game flow ---------- */
+let fxSeq = 0;
+function emitFx(e){ if (!G) return; e.id = ++fxSeq; G.fx.push(e); if (G.fx.length > 40) G.fx.shift(); render(); }
 function say(msg, strong){ if (!G) return; G.log.unshift({msg, strong:!!strong}); if (G.log.length > 120) G.log.pop(); render(); }
 function NP(){ return G.players.length; }
 function nextActive(from){ const n = NP(); for (let k = 1; k <= n; k++){ const j = (from + k) % n; if (!G.players[j].out) return j; } return from; }
@@ -490,6 +505,8 @@ function inHand(order){ return order.filter(p => !p.hand.folded); }
 async function hostRun(gid){
   const ok = () => G && G.id === gid;
   say(`荷官：歡迎入座。每人 ${S.chips} 枚籌碼，共 ${S.hands} 局。`, true);
+  const bots = G.players.filter(p => p.ai && p.tag);
+  if (bots.length) say(`電腦對手：${bots.map(p => `${p.name}（${p.tag}）`).join('、')}。`);
   for (let h = 1; h <= S.hands; h++){
     if (!ok()) return;
     if (G.players.filter(p => !p.out).length < 2) break;
@@ -516,12 +533,13 @@ async function playHand(gid){
   order.forEach(p => { p.chips -= ANTE; p.hand.contrib += ANTE; G.pot += ANTE; });
   G.level = ANTE;
   say(`每人先下底注 ${ANTE} 枚。`);
+  emitFx({type:'chip'});
   await sleep(500); if (!alive()) return;
 
   for (const p of order){
     while (true){
       const c = G.deck.pop();
-      if (c.t === 'n'){ p.hand.nums.push({...c, hidden:true}); break; }
+      if (c.t === 'n'){ p.hand.nums.push({...c, hidden:true}); emitFx({type:'deal'}); break; }
       G.deck.splice(Math.floor(Math.random() * G.deck.length), 0, c);
       say(`${p.name} 的暗牌抽到 ${c.t === 'sqrt' ? '√' : '×'}，退回重抽。`);
     }
@@ -570,7 +588,9 @@ async function playHand(gid){
     const w = fin[0];
     w.chips += G.pot; w.hand.tags.push(['good', `贏得 ${G.pot}`]);
     say(`${live.length > 1 ? '只剩一位完成宣告' : '其他人都棄牌'}，${w.name} 拿走底池 ${G.pot} 枚。`, true);
-    G.result = {winners:[w]}; G.pot = 0;
+    G.result = {winners:[w]};
+    emitFx({type:'win', lines:[{k:'本局贏家', text:w.name, sub:`拿走底池 ${G.pot} 枚`}], winners:[{seat:w.i, coins:Math.min(14, 5 + Math.floor(G.pot / 3))}]});
+    G.pot = 0;
   } else if (fin.length === 0){
     G.house += G.pot; say(`沒有人完成宣告，底池 ${G.pot} 枚由荷官沒收。`, true);
     G.result = {winners:[]}; G.pot = 0;
@@ -598,7 +618,7 @@ async function revealDeclarations(list, alive){
     if (d.high) parts.push(`${exprText(p.hand, d.high.expr)} = ${fmt(d.high.val)}`);
     if (d.low) parts.push(`${exprText(p.hand, d.low.expr)} = ${fmt(d.low.val)}`);
     say(`${p.name} 宣告 ${label}：${parts.join('；')}`);
-    render(); await sleep(1100);
+    emitFx({type:'reveal'}); await sleep(1100);
   }
   G.turn = -1;
 }
@@ -606,15 +626,17 @@ async function dealOpen(p, gid, betMs){
   const h = p.hand;
   while (true){
     const c = G.deck.pop();
-    if (c.t === 'n'){ h.nums.push({...c, hidden:false}); render(); await sleep(220); return; }
+    if (c.t === 'n'){ h.nums.push({...c, hidden:false}); emitFx({type:'deal'}); await sleep(220); return; }
     const sym = c.t === 'sqrt' ? '√' : '×';
     if (h.special){ say(`${p.name} 抽到第二張符號牌 ${sym}，丟棄並補牌。`); await sleep(250); continue; }
     h.special = c.t;
     if (c.t === 'sqrt'){
       h.sqrt = true;
       say(`${p.name} 抽到 √，再補一張牌。`);
+      emitFx({type:'special', seat:p.i, sym:'√', name:p.name});
     } else {
-      h.ops.push('*'); render();
+      h.ops.push('*');
+      emitFx({type:'special', seat:p.i, sym:'×', name:p.name});
       const opts = [...new Set(h.ops.filter(o => o === '+' || o === '-' || o === '*'))];
       let give = p.ai ? aiSurrender(p) : await ask(p, 'surrender', {opts}, betMs, () => aiSurrender(p));
       if (!G || G.id !== gid) return;
@@ -662,11 +684,11 @@ async function bettingRound(order, label, gid, betMs){
     if (h.folded) continue;
     if (act.a === 'fold'){ h.folded = true; h.act = act.timeout ? '逾時棄牌' : '棄牌'; say(`${p.name} ${act.timeout ? '逾時，自動棄牌' : '棄牌'}。`); }
     else if (act.a === 'check'){ h.act = act.timeout ? '逾時過牌' : '過牌'; say(`${p.name} ${act.timeout ? '逾時，自動過牌' : '過牌'}。`); }
-    else if (act.a === 'call'){ p.chips -= toCall; h.contrib += toCall; G.pot += toCall; h.act = `跟注 ${toCall}`; say(`${p.name} 跟注 ${toCall}。`); }
+    else if (act.a === 'call'){ p.chips -= toCall; h.contrib += toCall; G.pot += toCall; h.act = `跟注 ${toCall}`; say(`${p.name} 跟注 ${toCall}。`); emitFx({type:'chip'}); }
     else if (act.a === 'raise'){
       const to = Math.max(G.level + 1, Math.min(G.cap, act.to)), pay = to - h.contrib;
       p.chips -= pay; h.contrib += pay; G.pot += pay; G.level = to;
-      h.act = `加注到 ${to}`; say(`${p.name} 加注，每人投入提高到 ${to} 枚。`);
+      h.act = `加注到 ${to}`; say(`${p.name} 加注，每人投入提高到 ${to} 枚。`); emitFx({type:'chip'});
     }
     h.acted = true;
     render();
@@ -694,6 +716,11 @@ function showdown(live){
     winners.forEach(w => { w.chips += share; w.hand.tags.push(['good', `+${share}`]); });
     say(winners.length === 1 ? `底池 ${G.pot} 枚全部由 ${winners[0].name} 拿走。` : `底池 ${G.pot} 枚由 ${winners.map(w => w.name).join('、')} 平分，每人 ${share} 枚${rem ? `，餘下 ${rem} 枚由荷官沒收` : ''}。`, true);
     G.house += rem;
+    G.result = {winners};
+    const lines = [];
+    if (hi) lines.push({k:hi.p === (lo && lo.p) ? 'Swing 大小通吃' : '大方贏家', text:hi.p.name, sub:`= ${fmt(hi.p.hand.decl.high.val)}　+${share} 枚`});
+    if (lo && !(hi && hi.p === lo.p)) lines.push({k:'小方贏家', text:lo.p.name, sub:`= ${fmt(lo.p.hand.decl.low.val)}　+${share} 枚`});
+    emitFx({type:'win', lines, winners:winners.map(w => ({seat:w.i, coins:Math.min(14, 5 + Math.floor(share / 3))}))});
   }
   G.pot = 0;
   G.result = {winners};
@@ -712,11 +739,12 @@ function viewFor(seat){
     winners:G.result ? G.result.winners.map(p => p.i) : [],
     turnDeadline:G.turnDeadline ? Math.max(0, G.turnDeadline - Date.now()) : 0,
     log:G.log.slice(0, 80),
+    fx:G.fx.slice(-20),
     players:G.players.map(p => ({
-      i:p.i, name:p.name, ai:p.ai, chips:p.chips, out:p.out, connected:p.ai || p.connected, host:!!p.isHost,
+      i:p.i, name:p.name, ai:p.ai, tag:p.tag || '', desc:p.desc || '', chips:p.chips, out:p.out, connected:p.ai || p.connected, host:!!p.isHost,
       hand:p.hand ? {
         nums:p.hand.nums.map(n => (n.hidden && p.i !== seat && !p.hand.revealed) ? {back:true} : n),
-        ops:p.hand.ops, sqrt:p.hand.sqrt, contrib:p.hand.contrib, folded:p.hand.folded, act:p.hand.act, tags:p.hand.tags,
+        ops:p.hand.ops, sqrt:p.hand.sqrt, special:p.hand.special, contrib:p.hand.contrib, folded:p.hand.folded, act:p.hand.act, tags:p.hand.tags,
         declared:!!p.hand.decl,
         decl:p.hand.decl && (p.hand.shown || p.i === seat) ? {
           type:p.hand.decl.type,
@@ -832,8 +860,10 @@ function seatHTML(p, isMe, area){
     const seen = (SEEN[p.i] || 0) > h.nums.length ? 0 : (SEEN[p.i] || 0);
     cards = h.nums.map((n, k) => cardHTML(n, {size:isMe ? 'big' : '', fresh:k >= seen})).join('');
     SEEN[p.i] = h.nums.length;
+    if (h.special && isMe) cards += `<div class="card sym-card big" title="${h.special === 'sqrt' ? '這手牌有 √：要套用在一個數字上' : '這手牌有 ×'}">${h.special === 'sqrt' ? '√' : '×'}<span class="tier">${h.special === 'sqrt' ? '根號' : '乘號'}</span></div>`;
     ops = h.ops.map(o => `<span class="op${o === '*' ? ' special' : ''}">${OPD[o]}</span>`).join('') + (h.sqrt ? '<span class="op special">√</span>' : '');
     sub.push(`本局投入 ${h.contrib}`);
+    if (h.special && !isMe) sub.push(`<span class="pill sym">${h.special === 'sqrt' ? '√ 根號' : '× 乘號'}</span>`);
     if (h.act) sub.push(`<span class="pill${h.folded ? ' bad' : ''}">${esc(h.act)}</span>`);
     if (h.declared && !h.decl) sub.push('<span class="pill">已宣告</span>');
     else if (h.decl){
@@ -847,8 +877,8 @@ function seatHTML(p, isMe, area){
   else if (V.hand && !p.connected) sub.push('本局暫停');
   else sub.push('等待發牌');
   if (!h) SEEN[p.i] = 0;
-  return `<section class="${cls.join(' ')}" style="grid-area:${area}" aria-label="${esc(p.name)}">
-    <div class="seat-head"><span class="seat-name">${esc(p.name)}${isMe ? '（你）' : ''}${V.button === p.i ? ' <span class="pill">莊位</span>' : ''}${p.host ? ' <span class="pill hi">房主</span>' : ''}</span><span class="seat-chips">${p.chips} 枚</span></div>
+  return `<section class="${cls.join(' ')}" data-seat="${p.i}" style="grid-area:${area}" aria-label="${esc(p.name)}">
+    <div class="seat-head"><span class="seat-name">${esc(p.name)}${isMe ? '（你）' : ''}${p.tag ? ` <span class="pill tag" title="${esc(p.desc)}">${esc(p.tag)}</span>` : ''}${V.button === p.i ? ' <span class="pill">莊位</span>' : ''}${p.host ? ' <span class="pill hi">房主</span>' : ''}</span><span class="seat-chips">${p.chips} 枚</span></div>
     <div class="seat-sub">${sub.join('')}</div>
     <div class="cards">${cards}</div>
     <div class="ops">${ops}</div>${eq}
@@ -967,7 +997,15 @@ function drawGame(){
       }
     }
   }
+  playNewFx();
   if (V.over && !rankShown){ rankShown = true; showRank(); }
+}
+// Effects (sounds, coins, banners) arrive inside the state; play only ones we have not seen.
+let lastFx = -1;
+function playNewFx(){
+  const list = V.fx || [];
+  if (lastFx < 0){ lastFx = list.length ? list[list.length - 1].id : 0; return; }
+  for (const e of list) if (e.id > lastFx){ lastFx = e.id; try { fx.play(e); } catch (x) {} }
 }
 function tick(){
   document.querySelectorAll('[data-dl]').forEach(el => {
@@ -976,8 +1014,10 @@ function tick(){
     const s = Math.max(0, Math.ceil((dl - Date.now()) / 1000));
     el.textContent = `剩 ${s} 秒`;
     el.classList.toggle('urgent', s <= 5);
+    if (el.classList.contains('cd') && s <= 5 && s > 0 && s !== lastTickSec){ lastTickSec = s; fx.sound('tick'); }
   });
 }
+let lastTickSec = -1;
 setInterval(tick, 300);
 
 /* ---------- heartbeat: notice players (or the host) who vanished without a clean close ---------- */
@@ -1030,6 +1070,7 @@ function rulesHTML(){
     <li>${st.timer ? `下注 ${st.betSec} 秒、排算式 ${st.declSec} 秒。下注逾時：不用跟注就自動過牌，要跟注就自動棄牌；排算式逾時：已選邊而且算式排完，就用目前的算式宣告，否則視為棄牌。` : '這個房間不計時。'}</li>
     <li>牌局中斷線的玩家當局自動棄牌，籌碼保留；用同一個瀏覽器重新進房就能回到座位。</li>
     <li>房主的網頁是荷官，房主離開時整桌結束。</li>
+    <li>補上的電腦玩家會從 20 位個性不同的角色中隨機抽出，名字旁的標籤是他們的打法。</li>
     <li>電腦難度（房主開房時設定）：簡單常常漏算、普通偶爾漏算、困難每次都算到最好。排出剛好 1 很常見，押小時常要靠最小的數字牌比平手。</li>
   </ul>
   <div class="row"><button class="btn primary" data-act="close">知道了</button></div>`;
@@ -1043,6 +1084,7 @@ document.addEventListener('click', e => {
   if (act === 'backdrop'){ if (e.target === el) closeModal(); return; }
   switch (act){
     case 'rules': openModal(rulesHTML()); return;
+    case 'mute': fx.setMuted(!fx.isMuted()); updateMute(); if (!fx.isMuted()) fx.sound('tap'); return;
     case 'close': closeModal(); return;
     case 'create': doCreate(); return;
     case 'join': doJoin($('#join-code').value, $('#nm-join').value); return;
@@ -1106,5 +1148,7 @@ window.addEventListener('beforeunload', e => {
 });
 window.addEventListener('pagehide', () => { leaving = true; });
 
+function updateMute(){ const b = $('#muteBtn'); if (b) b.textContent = fx.isMuted() ? '音效：關' : '音效：開'; }
+updateMute();
 drawPre();
 </script>

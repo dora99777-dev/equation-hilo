@@ -192,6 +192,22 @@ a.btn{text-decoration:none;display:inline-block;color:var(--text)}
 .card.fresh{animation:deal .25s ease-out}
 @media (prefers-reduced-motion: reduce){.card.fresh{animation:none}}
 .need-side{color:var(--danger);font-size:13px}
+
+/* timers, special-card tile, character tag, stronger winner glow */
+.cd{font-family:var(--f-mono);font-size:12px;color:var(--muted);letter-spacing:0;margin-left:6px}
+.cd.urgent,.pill.timer.urgent{color:var(--danger);border-color:var(--danger)}
+.pill.timer{border-color:var(--brass);color:var(--brass)}
+.pill.sym{background:var(--brass);border-color:var(--brass);color:#22170a;font-weight:700;box-shadow:0 0 10px rgba(211,172,85,.55)}
+.pill.tag{border-color:#4f6f64;color:var(--muted);font-weight:500}
+.check{display:flex;gap:6px;align-items:center;font-size:13px}
+.check input{width:17px;height:17px;accent-color:var(--brass)}
+.mini-field{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--muted)}
+.mini-field input{width:56px;background:#0c1a16;border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 6px;font:inherit;font-size:14px}
+.card.sym-card{background:radial-gradient(circle at 50% 35%,#3a2a0c,#1a1306);border:2px solid var(--brass);color:var(--brass);font-family:var(--f-mono);box-shadow:0 0 0 2px rgba(211,172,85,.25),0 0 14px rgba(211,172,85,.45)}
+.card.sym-card .tier{color:var(--brass);font-size:calc(var(--w)*.2)}
+.seat.win{border-color:var(--brass);box-shadow:0 0 0 3px rgba(211,172,85,.55),0 0 26px rgba(211,172,85,.45);animation:winGlow 1.6s ease-in-out 3}
+@keyframes winGlow{50%{box-shadow:0 0 0 5px rgba(211,172,85,.8),0 0 36px rgba(211,172,85,.7)}}
+@media (prefers-reduced-motion: reduce){.seat.win{animation:none}}
 </style>
 </head>
 <body>
@@ -201,6 +217,7 @@ a.btn{text-decoration:none;display:inline-block;color:var(--text)}
     <div class="brand"><h1>等式<b>高低</b></h1><small>用 4 張數字牌與 + − ÷ 組出最接近 20 或 1 的算式</small></div>
     <div class="top-tools">
       <a class="btn" href="index.html">大廳</a>
+      <button class="btn" id="muteBtn" data-act="mute">音效：開</button>
       <button class="btn" id="speedBtn" data-act="speed">速度：一般</button>
       <button class="btn" data-act="rules">規則</button>
       <button class="btn" data-act="restart">重新開始</button>
@@ -211,18 +228,28 @@ a.btn{text-decoration:none;display:inline-block;color:var(--text)}
 </div>
 <div id="modal"></div>
 
+<script src="fx.js"></script>
 <script>
 "use strict";
+const fx = window.FX || {sound(){}, play(){}, setMuted(){}, isMuted:() => true, pickPersonas:n => [], personaById:() => null};
 const OPD = {'+':'+','-':'−','*':'×','/':'÷'};
 const TIER = ['黑','銅','銀','金'];
-const ROSTER = [
-  {name:'你'},
-  {name:'阿凱', agg:.78},
-  {name:'小雨', agg:.38},
-  {name:'老周', agg:.55},
-  {name:'米拉', agg:.66},
-  {name:'德生', agg:.30},
+// Fallback seats if fx.js (the 20 characters) failed to load.
+const FALLBACK_AI = [
+  {id:'kai', name:'阿凱', tag:'激進', agg:.78}, {id:'yu', name:'小雨', tag:'謹慎', agg:.38}, {id:'zhou', name:'老周', tag:'老練', agg:.55},
+  {id:'mila', name:'米拉', tag:'愛詐唬', agg:.66}, {id:'desheng', name:'德生', tag:'保守', agg:.30},
 ];
+const SETTINGS_KEY = 'eqhilo.singleSettings';
+function prefSettings(){
+  const d = {diff:'normal', timer:false, betSec:30, declSec:90};
+  try { const s = JSON.parse(localStorage.getItem(SETTINGS_KEY)); if (s) Object.assign(d, s); } catch (e) {}
+  if (!['easy','normal','hard'].includes(d.diff)) d.diff = 'normal';
+  d.betSec = Math.min(300, Math.max(10, parseInt(d.betSec, 10) || 30));
+  d.declSec = Math.min(600, Math.max(20, parseInt(d.declSec, 10) || 90));
+  d.timer = !!d.timer;
+  return d;
+}
+function storeSettings(){ try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({diff:G.diff, timer:G.timer.on, betSec:G.timer.betSec, declSec:G.timer.declSec})); localStorage.setItem('eqhilo.diff', G.diff); } catch (e) {} }
 const START_CHIPS = 30, HANDS = 9, ANTE = 1, EPS = 1e-9;
 let speed = 1;
 let G = null;
@@ -233,8 +260,8 @@ const SAVE_KEY = 'eqhilo.single.v1';
 function saveGame(){
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      v:1, hand:G.hand, button:G.button, house:G.house, diff:G.diff, savedAt:Date.now(),
-      players:G.players.map(p => ({chips:p.chips, out:p.out})), log:G.log.slice(0, 40)
+      v:1, hand:G.hand, button:G.button, house:G.house, diff:G.diff, timer:G.timer, savedAt:Date.now(),
+      players:G.players.map(p => ({chips:p.chips, out:p.out, pid:p.pid || null})), log:G.log.slice(0, 40)
     }));
   } catch (e) {}
 }
@@ -247,8 +274,9 @@ function continueGame(){
   const s = loadSave();
   if (!s) return;
   closeModal();
-  const id = newGame();
+  const id = newGame(s.players.slice(1).map(q => q.pid));
   G.button = s.button; G.house = s.house; G.hand = s.hand; G.log = s.log || []; G.diff = s.diff || 'normal';
+  if (s.timer) G.timer = {on:!!s.timer.on, betSec:s.timer.betSec || 30, declSec:s.timer.declSec || 90};
   s.players.forEach((q, i) => { G.players[i].chips = q.chips; G.players[i].out = q.out; });
   render(); renderLog();
   run(id, s.hand + 1);
@@ -371,16 +399,19 @@ function strength(hand){
   if (vals.length && Math.min(...vals) <= 1) sl += 0.08;
   return Math.max(sh, sl * 0.85);
 }
+// Personality: agg = raise often, loose = call light (negative folds easily), bluff = raise with weak hands.
 function aiBet(p, toCall){
+  const loose = p.loose || 0, bluff = p.bluff || 0;
   const s = strength(p.hand) + (Math.random() * 0.24 - 0.1) + (p.agg - 0.5) * 0.2;
   const canRaise = G.level < G.cap;
   const raiseTo = () => Math.min(G.cap, G.level + 1 + Math.floor(Math.random() * (1 + p.agg * 3)));
+  const bluffing = canRaise && Math.random() < bluff;
   if (toCall === 0){
-    if (canRaise && s > 0.62 && Math.random() < 0.35 + p.agg * 0.5) return {a:'raise', to:raiseTo()};
+    if (canRaise && (bluffing || (s > 0.62 && Math.random() < 0.35 + p.agg * 0.5))) return {a:'raise', to:raiseTo()};
     return {a:'check'};
   }
-  if (canRaise && s > 0.8 && Math.random() < p.agg * 0.6) return {a:'raise', to:raiseTo()};
-  if (s > 0.3 + toCall * 0.045) return {a:'call'};
+  if (canRaise && (bluffing || (s > 0.8 && Math.random() < p.agg * 0.6))) return {a:'raise', to:raiseTo()};
+  if (s > 0.3 - loose * 0.2 + toCall * 0.045) return {a:'call'};
   return {a:'fold'};
 }
 function aiSurrender(p){
@@ -406,10 +437,10 @@ function aiDeclare(p, rem = 0){
   const winHi = !curHi || beats('high', eh, curHi.entry);
   const winLo = !curLo || beats('low', el, curLo.entry);
   const mk = r => ({val:r.val, expr:r.expr});
-  if (winHi && winLo && b.high.dist < 0.5 && b.low.dist < 0.15 && Math.random() < 0.35 + p.agg * 0.5)
+  if (winHi && winLo && b.high.dist < 0.5 && b.low.dist < 0.15 && Math.random() < 0.35 + (p.swingy ?? p.agg) * 0.5)
     return {type:'swing', high:mk(b.high), low:mk(b.low)};
   const minV = Math.min(...h.nums.map(n => n.v));
-  let sh = Math.exp(-b.high.dist * 0.3) * Math.pow(0.93, hiList.length + rem) + 0.06;
+  let sh = Math.exp(-b.high.dist * 0.3) * Math.pow(0.93, hiList.length + rem) + 0.06 + (p.hiBias || 0) * 0.15;
   let sl = Math.exp(-b.low.dist * 1.1) * Math.pow(0.85, loList.length + rem) * (b.low.dist < EPS ? 0.6 + 0.4 * (1 - minV / 10) : 1);
   if (!winHi) sh *= 0.15;
   if (!winLo) sl *= 0.15;
@@ -423,21 +454,51 @@ function activePlayers(){ return G.players.filter(p => !p.out); }
 function nextActive(from){ for (let k = 1; k <= 6; k++){ const j = (from + k) % 6; if (!G.players[j].out) return j; } return from; }
 function orderFrom(start){ const r = []; for (let k = 0; k < 6; k++){ const p = G.players[(start + k) % 6]; if (!p.out) r.push(p); } return r; }
 function inHand(order){ return order.filter(p => !p.hand.folded); }
-function waitHuman(obj){ return new Promise(res => { G.await = {...obj, resolve:(v) => { G.await = null; res(v); }}; render(); }); }
+// ms > 0 starts a countdown; when it runs out, fallback(await) decides the move.
+function waitHuman(obj, ms = 0, fallback = null){
+  return new Promise(res => {
+    let timer = null;
+    const a = {...obj, deadline:ms ? Date.now() + ms : 0};
+    a.resolve = v => { if (G.await !== a) return; clearTimeout(timer); G.await = null; res(v); };
+    G.await = a;
+    if (ms && fallback) timer = setTimeout(() => { if (G.await === a){ a.resolve(fallback(a)); render(); } }, ms);
+    render();
+  });
+}
+const betMs = () => (G.timer.on && !humanAuto()) ? G.timer.betSec * 1000 : 0;
+const declMs = () => (G.timer.on && !humanAuto()) ? G.timer.declSec * 1000 : 0;
+// Timeout while arranging: declare what is on the board if a side is picked and it is complete.
+function draftDecl(b, h){
+  if (!b.type) return null;
+  const needs = b.type === 'swing' ? ['high','low'] : [b.type];
+  const d = {type:b.type};
+  for (const t of needs){ const v = eqValue(b.eq[t], h); if (!v.ok) return null; d[t] = {val:v.val, expr:v.expr}; }
+  return d;
+}
 const humanAuto = () => location.hash === '#auto';
 
-function newGame(){
+function newGame(pids){
   const id = G ? G.id + 1 : 1;
+  const pref = prefSettings();
+  let ai = pids && pids.every(Boolean) ? pids.map(x => fx.personaById(x)).filter(Boolean) : [];
+  if (ai.length !== 5) ai = fx.pickPersonas(5);
+  if (ai.length !== 5) ai = FALLBACK_AI;
+  const me = {i:0, name:'你', ai:false, agg:.5, chips:START_CHIPS, out:false, hand:null};
   G = {
     id, hand:0, button:Math.floor(Math.random() * 6), pot:0, house:0, level:0, cap:0, turn:-1,
-    phase:'等待開始', log:[], await:null, over:false, order:[], diff:prefDiff(),
-    players: ROSTER.map((r, i) => ({i, name:r.name, ai:i !== 0, agg:r.agg ?? .5, chips:START_CHIPS, out:false, hand:null}))
+    phase:'等待開始', log:[], await:null, over:false, order:[], diff:pref.diff,
+    timer:{on:pref.timer, betSec:pref.betSec, declSec:pref.declSec},
+    players:[me, ...ai.map((r, k) => ({i:k + 1, pid:r.id, name:r.name, tag:r.tag, desc:r.desc, ai:true, agg:r.agg ?? .5, loose:r.loose || 0, bluff:r.bluff || 0, swingy:r.swingy ?? r.agg ?? .5, hiBias:r.hiBias || 0, chips:START_CHIPS, out:false, hand:null}))]
   };
   render(); renderLog();
   return id;
 }
 async function run(id, from = 1){
-  if (from === 1){ clearSave(); say('荷官：歡迎入座。每人 30 枚籌碼，共 9 局。', true); }
+  if (from === 1){
+    clearSave();
+    say('荷官：歡迎入座。每人 30 枚籌碼，共 9 局。', true);
+    say(`今晚的對手：${G.players.slice(1).map(p => `${p.name}（${p.tag}）`).join('、')}。`);
+  }
   else say(`荷官：讀取存檔，從第 ${from} 局繼續。`, true);
   for (let h = from; h <= HANDS; h++){
     if (id !== G.id) return;
@@ -462,12 +523,12 @@ async function playHand(id){
   order.forEach(p => { p.chips -= ANTE; p.hand.contrib += ANTE; G.pot += ANTE; });
   G.level = ANTE;
   say(`每人先下底注 ${ANTE} 枚。`);
-  render(); await sleep(500); if (!alive()) return;
+  render(); fx.play({type:'chip'}); await sleep(500); if (!alive()) return;
 
   for (const p of order){
     while (true){
       const c = G.deck.pop();
-      if (c.t === 'n'){ p.hand.nums.push({...c, hidden:true}); break; }
+      if (c.t === 'n'){ p.hand.nums.push({...c, hidden:true}); fx.play({type:'deal'}); break; }
       G.deck.splice(Math.floor(Math.random() * G.deck.length), 0, c);
       say(`${p.name} 的暗牌抽到 ${c.t === 'sqrt' ? '√' : '×'}，退回重抽。`);
     }
@@ -485,20 +546,16 @@ async function playHand(id){
   }
 
   const live = inHand(order);
-  if (live.length === 1){
-    const w = live[0];
-    w.chips += G.pot; w.hand.tags.push(['good', `贏得 ${G.pot}`]);
-    say(`其他人都棄牌，${w.name} 拿走底池 ${G.pot} 枚。`, true);
-    G.result = {winners:[w]}; G.pot = 0;
-  } else {
+  if (live.length > 1){
     G.phase = '宣告與開牌';
     for (const [idx, p] of live.entries()){
       const rem = live.filter(q => q !== p && !q.hand.folded).length;
       G.turn = p.i; render();
       let d;
       if (p.ai || humanAuto()){ await sleep(900); d = aiDeclare(p, rem); }
-      else d = await waitHuman({kind:'declare', b:{type:null, tab:'high', eq:{high:emptyEq(), low:emptyEq()}}});
+      else d = await waitHuman({kind:'declare', b:{type:null, tab:'high', eq:{high:emptyEq(), low:emptyEq()}}}, declMs(), a => draftDecl(a.b, p.hand));
       if (!alive()) return;
+      if (!d){ p.hand.folded = true; p.hand.act = '未完成算式'; say(`${p.name} 沒有在時間內選邊並排完算式，視為棄牌。`); render(); continue; }
       p.hand.decl = d;
       say(`${p.name} 已宣告（內容保密）。`);
       render(); await sleep(350);
@@ -506,8 +563,20 @@ async function playHand(id){
     G.turn = -1;
     await revealDeclarations(live, alive);
     if (!alive()) return;
-    showdown(live);
   }
+  const fin = live.length > 1 ? live.filter(p => !p.hand.folded && p.hand.decl) : live;
+  if (fin.length === 1){
+    const w = fin[0];
+    w.chips += G.pot; w.hand.tags.push(['good', `贏得 ${G.pot}`]);
+    say(`${live.length > 1 ? '只剩一位完成宣告' : '其他人都棄牌'}，${w.name} 拿走底池 ${G.pot} 枚。`, true);
+    G.result = {winners:[w]};
+    render();
+    fx.play({type:'win', lines:[{k:'本局贏家', text:w.name, sub:`拿走底池 ${G.pot} 枚`}], winners:[{seat:w.i, coins:Math.min(14, 5 + Math.floor(G.pot / 3))}]});
+    G.pot = 0;
+  } else if (fin.length === 0){
+    G.house += G.pot; say(`沒有人完成宣告，底池 ${G.pot} 枚由荷官沒收。`, true);
+    G.result = {winners:[]}; G.pot = 0;
+  } else showdown(fin);
   order.forEach(p => { p.hand.revealed = true; });
   for (const p of order) if (p.chips <= 0 && !p.out){ p.out = true; say(`${p.name} 籌碼歸零，淘汰。`, true); }
   G.phase = '本局結束';
@@ -532,7 +601,7 @@ async function revealDeclarations(list, alive){
     if (d.high) parts.push(`${exprText(p.hand, d.high.expr)} = ${fmt(d.high.val)}`);
     if (d.low) parts.push(`${exprText(p.hand, d.low.expr)} = ${fmt(d.low.val)}`);
     say(`${p.name} 宣告 ${label}：${parts.join('；')}`);
-    render(); await sleep(1100);
+    render(); fx.play({type:'reveal'}); await sleep(1100);
   }
   G.turn = -1;
 }
@@ -540,17 +609,19 @@ async function dealOpen(p, id){
   const h = p.hand;
   while (true){
     const c = G.deck.pop();
-    if (c.t === 'n'){ h.nums.push({...c, hidden:false}); render(); await sleep(220); return; }
+    if (c.t === 'n'){ h.nums.push({...c, hidden:false}); render(); fx.play({type:'deal'}); await sleep(220); return; }
     const sym = c.t === 'sqrt' ? '√' : '×';
     if (h.special){ say(`${p.name} 抽到第二張符號牌 ${sym}，丟棄並補牌。`); await sleep(250); continue; }
     h.special = c.t;
     if (c.t === 'sqrt'){
       h.sqrt = true;
       say(`${p.name} 抽到 √，再補一張牌。`);
+      render(); fx.play({type:'special', seat:p.i, sym:'√', name:p.name});
     } else {
       h.ops.push('*'); render();
+      fx.play({type:'special', seat:p.i, sym:'×', name:p.name});
       const opts = [...new Set(h.ops.filter(o => o === '+' || o === '-' || o === '*'))];
-      const give = (p.ai || humanAuto()) ? aiSurrender(p) : await waitHuman({kind:'surrender', opts});
+      const give = (p.ai || humanAuto()) ? aiSurrender(p) : await waitHuman({kind:'surrender', opts}, betMs(), () => aiSurrender(p));
       if (id !== G.id) return;
       h.ops.splice(h.ops.indexOf(give), 1);
       say(`${p.name} 抽到 ×，交出 ${OPD[give]}，再補一張數字牌。`);
@@ -574,16 +645,17 @@ async function bettingRound(order, label, id){
     G.turn = p.i; render();
     let act;
     if (p.ai || humanAuto()){ await sleep(650); act = aiBet(p, toCall); }
-    else act = await waitHuman({kind:'bet', toCall, raiseTo:Math.min(G.cap, G.level + 1)});
+    else act = await waitHuman({kind:'bet', toCall, raiseTo:Math.min(G.cap, G.level + 1)}, betMs(),
+      () => toCall ? {a:'fold', timeout:true} : {a:'check', timeout:true});
     if (id !== G.id) return;
     const h = p.hand;
-    if (act.a === 'fold'){ h.folded = true; h.act = '棄牌'; say(`${p.name} 棄牌。`); }
-    else if (act.a === 'check'){ h.act = '過牌'; say(`${p.name} 過牌。`); }
-    else if (act.a === 'call'){ p.chips -= toCall; h.contrib += toCall; G.pot += toCall; h.act = `跟注 ${toCall}`; say(`${p.name} 跟注 ${toCall}。`); }
+    if (act.a === 'fold'){ h.folded = true; h.act = act.timeout ? '逾時棄牌' : '棄牌'; say(`${p.name} ${act.timeout ? '逾時，自動棄牌' : '棄牌'}。`); }
+    else if (act.a === 'check'){ h.act = act.timeout ? '逾時過牌' : '過牌'; say(`${p.name} ${act.timeout ? '逾時，自動過牌' : '過牌'}。`); }
+    else if (act.a === 'call'){ p.chips -= toCall; h.contrib += toCall; G.pot += toCall; h.act = `跟注 ${toCall}`; say(`${p.name} 跟注 ${toCall}。`); fx.play({type:'chip'}); }
     else if (act.a === 'raise'){
       const to = Math.max(G.level + 1, Math.min(G.cap, act.to)), pay = to - h.contrib;
       p.chips -= pay; h.contrib += pay; G.pot += pay; G.level = to;
-      h.act = `加注到 ${to}`; say(`${p.name} 加注，每人投入提高到 ${to} 枚。`);
+      h.act = `加注到 ${to}`; say(`${p.name} 加注，每人投入提高到 ${to} 枚。`); fx.play({type:'chip'});
     }
     h.acted = true;
     render();
@@ -612,6 +684,12 @@ function showdown(live){
     winners.forEach(w => { w.chips += share; w.hand.tags.push(['good', `+${share}`]); });
     say(winners.length === 1 ? `底池 ${G.pot} 枚全部由 ${winners[0].name} 拿走。` : `底池 ${G.pot} 枚由 ${winners.map(w => w.name).join('、')} 平分，每人 ${share} 枚${rem ? `，餘下 ${rem} 枚由荷官沒收` : ''}。`, true);
     G.house += rem;
+    G.result = {winners, failed};
+    render();
+    const lines = [];
+    if (hi) lines.push({k:hi.p === (lo && lo.p) ? 'Swing 大小通吃' : '大方贏家', text:hi.p.name, sub:`= ${fmt(hi.p.hand.decl.high.val)}　+${share} 枚`});
+    if (lo && !(hi && hi.p === lo.p)) lines.push({k:'小方贏家', text:lo.p.name, sub:`= ${fmt(lo.p.hand.decl.low.val)}　+${share} 枚`});
+    fx.play({type:'win', lines, winners:winners.map(w => ({seat:w.i, coins:Math.min(14, 5 + Math.floor(share / 3))}))});
   }
   G.pot = 0;
   G.result = {winners, failed};
@@ -664,6 +742,8 @@ function seatHTML(p, isMe){
     const seen = (SEEN[p.i] || 0) > h.nums.length ? 0 : (SEEN[p.i] || 0);
     cards = h.nums.map((n, k) => (n.hidden && !isMe && !h.revealed) ? cardHTML(n, {back:true, size: isMe ? 'big' : '', fresh:k >= seen}) : cardHTML(n, {size: isMe ? 'big' : '', fresh:k >= seen})).join('');
     SEEN[p.i] = h.nums.length;
+    if (h.special && !isMe) sub.push(`<span class="pill sym">${h.special === 'sqrt' ? '√ 根號' : '× 乘號'}</span>`);
+    if (h.special && isMe) cards += `<div class="card sym-card big" title="${h.special === 'sqrt' ? '這手牌有 √：要套用在一個數字上' : '這手牌有 ×'}">${h.special === 'sqrt' ? '√' : '×'}<span class="tier">${h.special === 'sqrt' ? '根號' : '乘號'}</span></div>`;
     ops = h.ops.map(o => `<span class="op${o === '*' ? ' special' : ''}">${OPD[o]}</span>`).join('') + (h.sqrt ? '<span class="op special">√</span>' : '');
     sub.push(`本局投入 ${h.contrib}`);
     if (h.act) sub.push(`<span class="pill${h.folded ? ' bad' : ''}">${h.act}</span>`);
@@ -680,8 +760,9 @@ function seatHTML(p, isMe){
   } else if (p.out) sub.push('<span class="pill bad">已淘汰</span>');
   else sub.push('等待發牌');
   if (!h) SEEN[p.i] = 0;
-  return `<section class="${cls.join(' ')}" style="grid-area:${isMe ? 'auto' : 's' + p.i}" aria-label="${p.name}">
-    <div class="seat-head"><span class="seat-name">${p.name}${G.button === p.i ? ' <span class="pill">莊位</span>' : ''}</span><span class="seat-chips">${p.chips} 枚</span></div>
+  if (isMe && G.await && G.await.deadline) sub.unshift(`<span class="pill timer" data-dl="${G.await.deadline}"></span>`);
+  return `<section class="${cls.join(' ')}" data-seat="${p.i}" style="grid-area:${isMe ? 'auto' : 's' + p.i}" aria-label="${p.name}">
+    <div class="seat-head"><span class="seat-name">${p.name}${p.tag ? ` <span class="pill tag" title="${p.desc || ''}">${p.tag}</span>` : ''}${G.button === p.i ? ' <span class="pill">莊位</span>' : ''}</span><span class="seat-chips">${p.chips} 枚</span></div>
     <div class="seat-sub">${sub.join('')}</div>
     <div class="cards">${cards}</div>
     <div class="ops">${ops}</div>${eq}
@@ -698,9 +779,22 @@ function centerHTML(){
       <span>投入上限</span><b>${G.cap || '—'}</b>
       <span>荷官沒收</span><b>${G.house}</b>
       <span>電腦難度</span><b>${DIFF_NAME[G.diff]}</b>
+      <span>行動計時</span><b>${G.timer.on ? `${G.timer.betSec}／${G.timer.declSec} 秒` : '關'}</b>
     </div>
   </div>`;
 }
+function cdHTML(){ return G.await && G.await.deadline ? ` <span class="cd" data-dl="${G.await.deadline}"></span>` : ''; }
+let lastTickSec = -1;
+function tick(){
+  document.querySelectorAll('[data-dl]').forEach(el => {
+    const dl = +el.dataset.dl;
+    const s = Math.max(0, Math.ceil((dl - Date.now()) / 1000));
+    el.textContent = `剩 ${s} 秒`;
+    el.classList.toggle('urgent', s <= 5);
+    if (el.classList.contains('cd') && s <= 5 && s > 0 && s !== lastTickSec){ lastTickSec = s; fx.sound('tick'); }
+  });
+}
+setInterval(tick, 250);
 function actionHTML(){
   const a = G.await, me = G.players[0];
   if (G.over) return `<div class="panel"><h3>遊戲結束</h3><div class="row"><button class="btn primary" data-act="restart">再玩一場</button><a class="btn" href="index.html">返回大廳</a><button class="btn" data-act="showrank">查看排名</button></div></div>`;
@@ -709,6 +803,9 @@ function actionHTML(){
     const dbtn = d => `<button class="btn${G.diff === d ? ' sel' : ''}" data-act="diff" data-v="${d}">${DIFF_NAME[d]}</button>`;
     return `<div class="panel"><h3>準備開始</h3>
       <div class="row"><span class="hint">電腦難度</span>${dbtn('easy')}${dbtn('normal')}${dbtn('hard')}</div>
+      <div class="row"><label class="check"><input type="checkbox" id="opt-timer" ${G.timer.on ? 'checked' : ''}> 行動計時</label>
+        <label class="mini-field">下注<input type="number" id="opt-bet" min="10" max="300" value="${G.timer.betSec}" inputmode="numeric">秒</label>
+        <label class="mini-field">排算式<input type="number" id="opt-decl" min="20" max="600" value="${G.timer.declSec}" inputmode="numeric">秒</label></div>
       <p class="hint">${{easy:'簡單：電腦常常看不出最好的排法。', normal:'普通：電腦大多數時候算得出好的算式，偶爾會漏算。', hard:'困難：電腦每次都會找到最佳算式。'}[G.diff]}按下開始後，荷官會發牌給六位玩家；每局結束會自動存檔在這個瀏覽器。${s ? '（繼續上一場會沿用存檔時的難度）' : ''}</p><div class="row">${s ? `<button class="btn primary" data-act="continue">繼續上一場（已打完第 ${s.hand} 局）</button><button class="btn" data-act="start">開新的一場</button>` : '<button class="btn primary" data-act="start">開始遊戲</button>'}</div></div>`;
   }
   if (!a){
@@ -721,11 +818,11 @@ function actionHTML(){
     return `<div class="panel"><h3>本局結算</h3><p class="hint">看完各家的算式後，進入下一局。</p><div class="row"><button class="btn primary" data-act="next">${G.hand >= HANDS ? '看最終結果' : '下一局'}</button></div></div>`;
   }
   if (a.kind === 'surrender'){
-    return `<div class="panel"><h3>你抽到 ×</h3><p class="hint">依規則要交出一張 +、− 或 × 符號牌，之後再補一張數字牌。</p><div class="row">${a.opts.map(o => `<button class="btn" data-act="surrender" data-v="${o}">交出 ${OPD[o]}</button>`).join('')}</div></div>`;
+    return `<div class="panel"><h3>你抽到 ×${cdHTML()}</h3><p class="hint">依規則要交出一張 +、− 或 × 符號牌，之後再補一張數字牌。</p><div class="row">${a.opts.map(o => `<button class="btn" data-act="surrender" data-v="${o}">交出 ${OPD[o]}</button>`).join('')}</div></div>`;
   }
   if (a.kind === 'bet'){
     const canRaise = G.level < G.cap;
-    return `<div class="panel"><h3>${G.phase}</h3>
+    return `<div class="panel"><h3>${G.phase}${cdHTML()}</h3>
       <p class="hint">目前每人投入 ${G.level} 枚，你已投入 ${me.hand.contrib} 枚${a.toCall ? `，需跟注 ${a.toCall} 枚` : ''}。本局上限 ${G.cap} 枚。</p>
       <div class="row">
         <button class="btn danger" data-act="fold">棄牌</button>
@@ -764,7 +861,7 @@ function builderHTML(){
     return `<div>算式：${r.ok ? `<span class="ok">= ${fmt(r.val)}</span>（離 20 差 ${fmt(Math.abs(r.val - 20))}，離 1 差 ${fmt(Math.abs(r.val - 1))}）` : `<span class="bad">${r.why}</span>`}</div>`;
   })();
   const ready = !!b.type && needs.every(t => eqValue(b.eq[t], h).ok);
-  return `<div class="panel"><h3>輪到你選邊並排出算式</h3>
+  return `<div class="panel"><h3>輪到你選邊並排出算式${cdHTML()}</h3>
     <div class="row">
       <button class="btn${b.type === 'high' ? ' sel' : ''}" data-act="dtype" data-v="high">賭大（20）</button>
       <button class="btn${b.type === 'low' ? ' sel' : ''}" data-act="dtype" data-v="low">賭小（1）</button>
@@ -782,6 +879,7 @@ function render(){
   if (!G) return;
   const ai = G.players.slice(1).map(p => seatHTML(p, false)).join('');
   $('#table').innerHTML = ai + centerHTML() + `<div class="me">${seatHTML(G.players[0], true)}${actionHTML()}</div>`;
+  tick();
   // When it becomes your turn, bring the action panel into view (matters most on phones).
   if (G.await && G.await !== lastShown){
     lastShown = G.await;
@@ -821,6 +919,10 @@ function rulesHTML(){
   <ul><li>可以過牌、跟注、加注或棄牌。</li><li>每人本局的總投入，不能超過場上籌碼最少的玩家（開局時的籌碼）。</li></ul>
   <h4>勝負</h4>
   <ul><li>賭大：最接近 20 的人贏；賭小：最接近 1 的人贏。</li><li>距離相同時，賭大比手上最大的數字牌，賭小比最小的數字牌；數字也相同就比顏色（賭大比高、賭小比低）。</li><li>Swing 要排出兩條算式，大小兩邊都贏才算贏，否則失去資格。</li><li>底池由所有贏家平分，除不盡的籌碼由荷官沒收。</li><li>籌碼歸零即淘汰；9 局後以籌碼數決定名次。</li></ul>
+  <h4>行動計時（可在開局前開關）</h4>
+  <ul><li>下注逾時：不用跟注就自動過牌，要跟注就自動棄牌。</li><li>排算式逾時：已選邊而且算式排完就直接宣告，否則視為棄牌。</li></ul>
+  <h4>電腦角色</h4>
+  <ul><li>每場從 20 位個性不同的角色裡隨機抽 5 位，名字旁的標籤是他們的打法（例如謹慎、激進、愛詐唬、跟注站）。把滑鼠移到標籤上可以看說明。</li></ul>
   <h4>電腦難度</h4>
   <ul><li>簡單：電腦只會想到少數幾種排法，常常錯過最好的算式。</li><li>普通：電腦大多數時候算得出好的算式，偶爾會漏算。</li><li>困難：電腦每次都把所有排法算過一遍。</li><li>排出剛好 1 其實很常見（大約三成的手牌做得到），所以押小時常要靠「最小的數字牌」比平手。</li></ul>
   <div class="row"><button class="btn primary" data-act="close">知道了</button></div>`;
@@ -835,7 +937,8 @@ document.addEventListener('click', (e) => {
   switch (act){
     case 'start': if (!G.hand){ run(G.id); } break;
     case 'continue': if (!G.hand) continueGame(); break;
-    case 'diff': if (!G.hand){ G.diff = el.dataset.v; try { localStorage.setItem('eqhilo.diff', G.diff); } catch (x) {} render(); } break;
+    case 'diff': if (!G.hand){ G.diff = el.dataset.v; storeSettings(); render(); } break;
+    case 'mute': fx.setMuted(!fx.isMuted()); updateMute(); if (!fx.isMuted()) fx.sound('tap'); break;
     case 'restart': closeModal(); { const id = newGame(); run(id); } break;
     case 'rules': openModal(rulesHTML()); break;
     case 'close': closeModal(); break;
@@ -880,9 +983,21 @@ document.addEventListener('click', (e) => {
   }
 });
 
+function updateMute(){ const b = $('#muteBtn'); if (b) b.textContent = fx.isMuted() ? '音效：關' : '音效：開'; }
+document.addEventListener('change', e => {
+  if (!G || G.hand) return;
+  const id = e.target.id;
+  if (id === 'opt-timer') G.timer.on = e.target.checked;
+  else if (id === 'opt-bet') G.timer.betSec = Math.min(300, Math.max(10, parseInt(e.target.value, 10) || 30));
+  else if (id === 'opt-decl') G.timer.declSec = Math.min(600, Math.max(20, parseInt(e.target.value, 10) || 90));
+  else return;
+  storeSettings(); render();
+});
+updateMute();
 newGame();
 if (humanAuto()) run(G.id);
 else if (location.hash === '#continue' && loadSave()) continueGame();
+else if (location.hash === '#new'){ history.replaceState(null, '', location.pathname); run(G.id); }
 </script>
 </body>
 </html>
