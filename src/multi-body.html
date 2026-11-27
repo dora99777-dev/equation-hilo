@@ -317,7 +317,8 @@ function homeHTML(){
       <div class="row"><button class="btn primary" data-act="create">建立房間</button></div>
       <p class="hint">你的瀏覽器會擔任荷官，牌局進行中請不要關掉這個網頁。建議用電腦開房。</p>
     </section>`;
-  return `<div class="pre-grid">${urlCode ? join + create : create + join}</div><p class="pre-msg" id="preMsg" role="status"></p>`;
+  // From the lobby's "建立房間" there is no room code, so only the create form is shown.
+  return `<div class="pre-grid${urlCode ? '' : ' solo'}">${urlCode ? join + create : create}</div><p class="pre-msg" id="preMsg" role="status"></p>`;
 }
 function waitHTML(){
   const isHost = role === 'host';
