@@ -168,9 +168,17 @@ footer{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 16p
     </div>
   </div>
 </div>
+<script src="fx.js"></script>
 <script>
 "use strict";
 (function(){
+  // Button sounds come from fx.js; links wait a moment so the click sound is not cut off by the page change.
+  const go = href => setTimeout(() => { location.href = href; }, window.FX && !FX.isMuted() ? 140 : 0);
+  document.querySelectorAll('a.btn[href]').forEach(a => {
+    if (a.id === 'newBtn') return;
+    a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); go(a.getAttribute('href')); });
+  });
+  document.addEventListener('change', e => { if (e.target.matches('input[type=checkbox]') && window.FX) FX.sound('tap'); });
   let s = null;
   try { s = JSON.parse(localStorage.getItem('eqhilo.single.v1')); } catch (e) {}
   if (s && s.v === 1){
@@ -210,13 +218,13 @@ footer{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 16p
     st.betSec = Math.min(300, Math.max(10, parseInt(bet.value, 10) || 30));
     st.declSec = Math.min(600, Math.max(20, parseInt(decl.value, 10) || 90));
     try { localStorage.setItem(KEY, JSON.stringify(st)); localStorage.setItem('eqhilo.diff', st.diff); } catch (e) {}
-    location.href = 'single.html#new';
+    go('single.html#new');
   });
   document.getElementById('joinForm').addEventListener('submit', e => {
     e.preventDefault();
     const code = document.getElementById('code').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (code.length !== 4){ document.getElementById('err').textContent = '房號是 4 個字元，請再確認一次。'; return; }
-    location.href = 'multi.html?room=' + code;
+    go('multi.html?room=' + code);
   });
 })();
 </script>
